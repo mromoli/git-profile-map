@@ -179,7 +179,7 @@ $('create-profile').addEventListener('click', async () => {
   finally { $('create-profile').disabled = false; }
 });
 $('copy-public-key').addEventListener('click', async () => { if (createdProfile) { await window.profileMap.copyPublicKey(createdProfile.publicKey); $('copy-public-key').textContent = 'Copied'; } });
-$('open-key-settings').addEventListener('click', async () => { if (createdProfile) { try { await window.profileMap.openKeySettings(createdProfile.keyUrl); } catch (error) { showError(error); } } });
+$('open-key-settings').addEventListener('click', async () => { if (createdProfile) { try { await window.profileMap.openAccountSettings(createdProfile.keyUrl); } catch (error) { showError(error); } } });
 $('another-profile').addEventListener('click', () => { createdProfile = null; $('setup-alias').value = ''; $('setup-email').value = ''; $('setup-form').classList.remove('hidden'); $('setup-complete').classList.add('hidden'); $('copy-public-key').textContent = 'Copy public key'; });
 $('favorite').addEventListener('click', async () => {
   if (!current) return;
