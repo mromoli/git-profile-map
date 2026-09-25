@@ -388,8 +388,9 @@ for (const button of document.querySelectorAll('.theme-switch button')) {
   button.addEventListener('click', async () => { try { showTheme(await api.setTheme(button.dataset.theme)); } catch (error) { showError(error); } });
 }
 
-api.appearance().then(({ platform, accent, theme }) => {
+api.appearance().then(({ platform, version, accent, theme }) => {
   document.documentElement.dataset.platform = platform;
+  $('app-version').textContent = `v${version}`;
   showTheme(theme);
   if (accent) document.documentElement.style.setProperty('--accent', `#${accent.slice(0, 6)}`);
 }).catch(() => {});
