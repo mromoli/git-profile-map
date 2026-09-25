@@ -5,14 +5,17 @@ const { readJsonArray, writeJsonAtomic } = require('./json-file.cjs');
 
 function git(args, { cwd, input } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
+    const child = spawn('git', args, { cwd, windowsHide: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
     let stdout = '', stderr = '';
+    // If git exits before reading its input, the write fails with EPIPE; the exit code already reports that.
+    child.stdin?.on('error', () => {});
     const timer = setTimeout(() => child.kill(), 20000);
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.on('error', error => { clearTimeout(timer); reject(error.code === 'ENOENT' ? new Error('git is not installed or is not on PATH.') : error); });
     child.on('close', code => { clearTimeout(timer); code === 0 ? resolve(stdout.trim()) : reject(Object.assign(new Error(stderr.trim() || `git exited with ${code}`), { code })); });
-    child.stdin.end(input ?? '');
+    child.stdin?.end(input);
   });
 }
 
