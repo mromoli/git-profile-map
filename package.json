@@ -16,7 +16,8 @@
     "start": "electron .",
     "test": "node --test",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "screenshots": "electron scripts/screenshots.cjs"
   },
   "devDependencies": {
     "electron": "^44.4.5",

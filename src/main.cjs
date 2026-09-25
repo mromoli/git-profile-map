@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, clipboard, shell, systemPreferences, nativeTheme } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
 const core = require('./core.cjs');
 const { createFavorites } = require('./favorites.cjs');
 const { createSshProfile } = require('./ssh-setup.cjs');
@@ -42,7 +43,7 @@ app.whenReady().then(() => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0];
   });
-  ipcMain.handle('appearance', () => ({ platform: process.platform, version: app.getVersion(), theme: nativeTheme.themeSource, accent: ['darwin', 'win32'].includes(process.platform) ? systemPreferences.getAccentColor?.() || null : null }));
+  ipcMain.handle('appearance', () => ({ platform: process.platform, home: os.homedir(), version: app.getVersion(), theme: nativeTheme.themeSource, accent: ['darwin', 'win32'].includes(process.platform) ? systemPreferences.getAccentColor?.() || null : null }));
   ipcMain.handle('providers', () => providers);
   ipcMain.handle('inspect', (_event, folder) => core.inspect(folder));
   ipcMain.handle('profiles', async () => ({ ...await core.profiles(), httpsProfiles: await httpsProfiles.list() }));

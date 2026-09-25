@@ -9,8 +9,11 @@ let watchPaths = [];
 const watchStatuses = new Map();
 const watchProfiles = new Map();
 const checking = new Set();
+let home = '';
 const text = (id, value) => { $(id).textContent = value || '—'; };
-const sourceName = record => record ? `${record.scope} · ${record.source.replace(/^file:/, '')}` : 'No setting found';
+// Shows paths under the home folder as ~/…
+const tilde = value => home && value?.startsWith(home) && /^([\\/]|$)/.test(value.slice(home.length)) ? `~${value.slice(home.length)}` : value;
+const sourceName = record => record ? `${record.scope} · ${tilde(record.source.replace(/^file:/, ''))}` : 'No setting found';
 const baseName = root => root.split(/[\\/]/).filter(Boolean).at(-1) || root;
 const showNotice = (message, kind = 'error') => { $('notice').textContent = message; $('notice').classList.toggle('info', kind === 'info'); $('notice').classList.remove('hidden'); };
 const showError = error => showNotice(error.message || String(error));
@@ -87,7 +90,7 @@ function renderWatchlist() {
       ? [config.name?.value || 'No commit name', config.email?.value || 'No commit email', signInSummary(config)].filter(Boolean).join(' · ')
       : watchProfiles.has(root) ? 'Profile unavailable' : 'Reading Git profile…';
     const status = watchStatuses.get(root);
-    main.append(el('strong', '', baseName(root)), el('span', 'watch-profile', profile), el('span', '', root),
+    main.append(el('strong', '', baseName(root)), el('span', 'watch-profile', profile), el('span', '', tilde(root)),
       el('small', '', status?.detail ? `${status.detail} · ${formatTime(status)}` : formatTime(status)));
     const actions = el('div', 'watch-actions');
     const badge = el('span', `watch-badge ${statusClass(status)}`, checking.has(root) ? 'Checking…' : statusLabel(status));
@@ -207,7 +210,7 @@ async function render(folder) {
   text('path-hint', 'Repository found');
   text('repo-name', baseName(data.root));
   $('nav-repository-label').textContent = baseName(data.root);
-  text('repo-path', data.root);
+  text('repo-path', tilde(data.root));
   text('identity-name', data.name?.value || 'No name set');
   text('identity-email', data.email?.value || 'No email set');
   $('identity-source').textContent = `Name from ${data.name?.scope || 'nowhere'} · email from ${data.email?.scope || 'nowhere'} config`;
@@ -388,7 +391,9 @@ for (const button of document.querySelectorAll('.theme-switch button')) {
   button.addEventListener('click', async () => { try { showTheme(await api.setTheme(button.dataset.theme)); } catch (error) { showError(error); } });
 }
 
-api.appearance().then(({ platform, version, accent, theme }) => {
+api.appearance().then(({ platform, home: homeDir, version, accent, theme }) => {
+  home = homeDir;
+  renderWatchlist();
   document.documentElement.dataset.platform = platform;
   $('app-version').textContent = `v${version}`;
   showTheme(theme);
