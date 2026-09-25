@@ -38,21 +38,20 @@
             "arm64",
             "x64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
         }
       ],
-      "identity": null
+      "identity": "-",
+      "artifactName": "Git-Profile-Map-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": false
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "linux": {
@@ -62,11 +61,15 @@
       ],
       "category": "Development"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "releaseType": "draft"
-      }
-    ]
+    "dmg": {
+      "writeUpdateInfo": false
+    },
+    "nsis": {
+      "artifactName": "Git-Profile-Map-Setup-${version}.${ext}",
+      "differentialPackage": false
+    },
+    "appImage": {
+      "artifactName": "Git-Profile-Map-${version}.${ext}"
+    }
   }
 }

@@ -90,7 +90,9 @@ const frameCss = theme => `
     background: #ff5f57; box-shadow: 20px 0 0 #febc2e, 40px 0 0 #28c840; }
   main { height: auto !important; }
   .drag-strip { display: none; }
-  main::-webkit-scrollbar { display: none; }`;
+  main::-webkit-scrollbar { display: none; }
+  /* A hidden window pauses transitions, which would freeze colours mid-way between themes. */
+  *, *::before, *::after { transition: none !important; animation: none !important; }`;
 
 app.whenReady().then(async () => {
   ipcMain.removeHandler('connection-check');
@@ -101,6 +103,7 @@ app.whenReady().then(async () => {
   await wait(1200);
   const win = BrowserWindow.getAllWindows()[0];
   win.setContentSize(1360, 900);
+  win.webContents.setBackgroundThrottling(false);
   const js = code => win.webContents.executeJavaScript(code);
   const until = async code => { for (let i = 0; i < 100 && !(await js(code)); i++) await wait(100); };
   fs.mkdirSync(out, { recursive: true });
