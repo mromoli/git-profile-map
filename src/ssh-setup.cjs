@@ -47,7 +47,7 @@ async function createSshProfile(request, home = os.homedir()) {
   try {
     await generateKey(keyFile, email, passphrase);
     generated = true;
-    const block = `Host ${alias}\n  HostName ${provider.hostname}\n  User git\n  IdentityFile ${keyFile}\n  IdentitiesOnly yes\n`;
+    const block = `Host ${alias}\n  HostName ${provider.hostname}\n  User git\n  IdentityFile "${keyFile}"\n  IdentitiesOnly yes\n`;
     // Write through symlinks (dotfile managers) instead of replacing them.
     const target = await fs.realpath(configFile).catch(() => configFile);
     const mode = (await fs.stat(target).catch(() => null))?.mode & 0o777 || 0o600;

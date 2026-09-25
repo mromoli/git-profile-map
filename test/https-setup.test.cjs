@@ -17,7 +17,7 @@ test('saves an HTTPS profile and hands the token to the configured credential he
     const store = path.join(home, 'credentials');
     // Isolated from the real keychain: the store helper writes to a temp file.
     execFileSync('git', ['init', '-q', home]);
-    execFileSync('git', ['config', '--local', 'credential.helper', `store --file=${store}`], { cwd: home });
+    execFileSync('git', ['config', '--local', 'credential.helper', `store --file=${store.replaceAll('\\', '/')}`], { cwd: home });
     const profiles = createHttpsProfiles(path.join(home, 'https.json'), home);
     const result = await profiles.create({ provider: 'github', username: 'test-account', token: 'fake-token-123' });
     assert.equal(result.tokenSaved, true);

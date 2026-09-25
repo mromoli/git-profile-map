@@ -18,7 +18,8 @@ test('creates a separate key and appends a named SSH profile without replacing e
     const config = await fs.readFile(path.join(sshDir, 'config'), 'utf8');
     assert.match(config, /^Host existing\n  HostName example.com/m);
     assert.match(config, /Host github-work\n  HostName github.com\n  User git\n/);
-    assert.equal((await fs.stat(path.join(sshDir, 'id_ed25519_github-work'))).mode & 0o777, 0o600);
+    // Windows has no POSIX permission bits; ssh-keygen restricts the key with ACLs there instead.
+    if (process.platform !== 'win32') assert.equal((await fs.stat(path.join(sshDir, 'id_ed25519_github-work'))).mode & 0o777, 0o600);
     await assert.rejects(createSshProfile({ provider: 'github', alias: 'github-work', email: 'work@example.com' }, home), /already exists/);
   } finally { await fs.rm(home, { recursive: true, force: true }); }
 });
@@ -57,5 +58,16 @@ test('reads host aliases from included files and ignores comments and wildcards'
     await fs.writeFile(path.join(sshDir, 'config'), 'Include config.d/*\nHost personal # my account\n  HostName github.com\nHost *.internal !skip\n');
     await fs.writeFile(path.join(sshDir, 'config.d', 'work'), 'Host work-gh\n  HostName github.com\n');
     assert.deepEqual((await readSshHosts(home)).sort(), ['personal', 'work-gh']);
+  } finally { await fs.rm(home, { recursive: true, force: true }); }
+});
+
+test('quotes the key path so a home folder with spaces still works', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'git profile ssh '));
+  try {
+    await createSshProfile({ provider: 'github', alias: 'github-space', email: 'work@example.com', passphrase: '' }, home);
+    const configFile = path.join(home, '.ssh', 'config');
+    const resolved = execFileSync('ssh', ['-G', '-F', configFile, 'github-space'], { encoding: 'utf8' });
+    const key = resolved.match(/^identityfile (.+)$/m)[1];
+    assert.equal(path.resolve(key), path.join(home, '.ssh', 'id_ed25519_github-space'));
   } finally { await fs.rm(home, { recursive: true, force: true }); }
 });
