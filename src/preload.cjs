@@ -16,5 +16,9 @@ contextBridge.exposeInMainWorld('profileMap', {
   favorites: () => ipcRenderer.invoke('favorites-list'),
   favoriteAdd: folder => ipcRenderer.invoke('favorites-add', folder),
   favoriteRemove: root => ipcRenderer.invoke('favorites-remove', root),
+  folderRules: () => ipcRenderer.invoke('folder-rules'),
+  previewFolderRule: request => ipcRenderer.invoke('folder-rule-preview', request),
+  applyFolderRule: request => ipcRenderer.invoke('folder-rule-apply', request),
+  removeFolderRule: condition => ipcRenderer.invoke('folder-rule-remove', condition),
   checkConnection: (folder, kind) => ipcRenderer.invoke('connection-check', folder, kind)
 });

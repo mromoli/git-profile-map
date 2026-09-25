@@ -260,6 +260,12 @@ textarea { height: auto; min-height: 96px; padding: 10px 12px; resize: vertical;
 .profile-row div { flex: 1; min-width: 0; }
 .profile-row strong { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-row span { display: block; font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-field { display: flex; align-items: flex-end; gap: 8px; }
+.path-field .field { flex: 1; }
+.path-field .secondary { margin-bottom: 1px; }
+#use-for-folder, #folder-new { display: block; margin: 12px auto 0; }
+.profile-row .row-actions { flex: none; display: flex; gap: 2px; }
+.profile-row .rule-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 99px; background: var(--hairline); color: var(--text-3); font-size: 10.5px; font-weight: 600; vertical-align: 1px; }
 .profile-empty { color: var(--text-3); font-size: 12px; padding: 4px 0 10px; margin: 0; }
 
 /* Review sheet */

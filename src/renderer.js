@@ -13,7 +13,22 @@ let home = '';
 const text = (id, value) => { $(id).textContent = value || '—'; };
 // Shows paths under the home folder as ~/…
 const tilde = value => home && value?.startsWith(home) && /^([\\/]|$)/.test(value.slice(home.length)) ? `~${value.slice(home.length)}` : value;
-const sourceName = record => record ? `${record.scope} · ${tilde(record.source.replace(/^file:/, ''))}` : 'No setting found';
+const tildeAll = value => home && value ? value.split(`${home}/`).join('~/') : value;
+const sourceFile = record => tilde(record.source.replace(/^file:/, ''));
+const ruleFolder = condition => condition?.match(/^gitdir(?:\/i)?:(.+)$/)?.[1];
+// Git reports a file pulled in by include/includeIf under the scope of the file that included it,
+// so "global" alone would hide that a value really comes from ~/work.gitconfig or a folder rule.
+function scopeLabel(record) {
+  if (!record) return 'nowhere';
+  const condition = record.via?.condition;
+  if (condition) return ruleFolder(condition) ? `the folder rule for ${tilde(ruleFolder(condition))}` : `the ${condition} rule`;
+  return record.via ? `${record.scope} config via ${sourceFile(record)}` : `${record.scope} config`;
+}
+function sourceName(record) {
+  if (!record) return 'No setting found';
+  if (record.via?.condition) return `folder rule ${tilde(ruleFolder(record.via.condition) || record.via.condition)}`;
+  return `${record.scope} · ${sourceFile(record)}${record.via ? ` · included by ${tilde(record.via.includedFrom)}` : ''}`;
+}
 const baseName = root => root.split(/[\\/]/).filter(Boolean).at(-1) || root;
 const showNotice = (message, kind = 'error') => { $('notice').textContent = message; $('notice').classList.toggle('info', kind === 'info'); $('notice').classList.remove('hidden'); };
 const showError = error => showNotice(error.message || String(error));
@@ -51,12 +66,14 @@ function showView(view) {
   $('overview-view').classList.toggle('hidden', view !== 'overview');
   $('watchlist').classList.toggle('hidden', view !== 'watchlist');
   $('new-profile-view').classList.toggle('hidden', view !== 'new-profile');
+  $('folders-view').classList.toggle('hidden', view !== 'folders');
   $('results').classList.toggle('hidden', view !== 'repository');
-  for (const [name, id] of [['overview', 'nav-overview'], ['watchlist', 'nav-watchlist'], ['new-profile', 'nav-new-profile'], ['repository', 'nav-repository']])
+  for (const [name, id] of [['overview', 'nav-overview'], ['watchlist', 'nav-watchlist'], ['new-profile', 'nav-new-profile'], ['folders', 'nav-folders'], ['repository', 'nav-repository']])
     $(id).classList.toggle('selected', view === name);
   clearError();
   $('main').scrollTo(0, 0);
   if (view === 'new-profile') refreshProfiles().then(renderProfileList).catch(showError);
+  if (view === 'folders') refreshFolders().catch(showError);
 }
 
 async function refreshProfiles() {
@@ -163,12 +180,13 @@ function addOrigin(label, value) {
 function renderSignIn(data) {
   const method = data.remote.method;
   text('auth-method', ({ ssh: 'SSH', https: 'HTTPS', local: 'LOCAL', none: 'NONE' })[method]);
-  text('remote-url', data.origin?.value || 'No origin configured');
+  text('remote-url', data.effectiveOrigin || 'No origin configured');
   $('ssh-target').textContent = ''; $('ssh-key').textContent = ''; $('auth-detail').textContent = '';
   if (method === 'ssh') {
     text('ssh-host', data.remote.host);
     if (data.ssh?.hostname) $('ssh-target').textContent = `Connects to ${data.ssh.user}@${data.ssh.hostname}`;
     $('ssh-key').textContent = data.ssh?.identityFiles?.length ? `Key: ${data.ssh.identityFiles.join(', ')}` : 'No SSH key resolved';
+    if (data.originRewrite) $('auth-detail').textContent = `Rewritten from ${data.originRewrite.from}${data.originRewrite.via?.condition ? ` by the folder rule for ${tilde(ruleFolder(data.originRewrite.via.condition))}` : data.originRewrite.source ? ` by ${sourceFile(data.originRewrite)}` : ''}`;
     if (data.coreSshCommand) $('auth-detail').textContent = `SSH command override: ${data.coreSshCommand.value}`;
   } else if (method === 'https') {
     text('ssh-host', data.httpsUser || 'No account chosen');
@@ -213,17 +231,24 @@ async function render(folder) {
   text('repo-path', tilde(data.root));
   text('identity-name', data.name?.value || 'No name set');
   text('identity-email', data.email?.value || 'No email set');
-  $('identity-source').textContent = `Name from ${data.name?.scope || 'nowhere'} · email from ${data.email?.scope || 'nowhere'} config`;
+  const [nameFrom, emailFrom] = [scopeLabel(data.name), scopeLabel(data.email)];
+  $('identity-source').textContent = nameFrom === emailFrom ? `Name and email from ${nameFrom}` : `Name from ${nameFrom} · email from ${emailFrom}`;
   renderSignIn(data);
   $('origins').replaceChildren();
   addOrigin('Commit name', sourceName(data.name));
   addOrigin('Commit email', sourceName(data.email));
   addOrigin('Origin remote', sourceName(data.origin));
+  if (data.originRewrite) addOrigin('URL rewrite', data.originRewrite.source ? sourceName({ scope: 'global', ...data.originRewrite }) : 'url.insteadOf');
   if (data.pushUrl) addOrigin('Push URL', `${data.pushUrl.value} · ${sourceName(data.pushUrl)}`);
   if (data.credentialHelper) addOrigin('Credential helper', sourceName(data.credentialHelper));
   if (data.credentialUser) addOrigin('HTTPS account', sourceName(data.credentialUser));
   if (data.coreSshCommand) addOrigin('SSH command', sourceName(data.coreSshCommand));
-  for (const include of data.conditionalIncludes) addOrigin('Folder rule', include.rule);
+  const applied = new Set([data.name, data.email, data.credentialUser, data.coreSshCommand].map(record => record?.via?.condition).filter(Boolean));
+  for (const include of data.conditionalIncludes) {
+    const [key, value] = include.rule.split('\n');
+    const condition = key.replace(/^includeif\./i, '').replace(/\.path$/i, '');
+    addOrigin(applied.has(condition) ? 'Folder rule (applies)' : 'Folder rule', `${tilde(ruleFolder(condition) || condition)} → ${tilde(value)}`);
+  }
   $('new-name').value = data.name?.value || '';
   $('new-email').value = data.email?.value || '';
   await refreshProfiles();
@@ -339,30 +364,149 @@ $('preview').addEventListener('click', async () => {
       expectedRoot: current.root, expectedRemote: current.origin?.value || '' };
     const preview = await api.preview(current.root, proposed);
     if (!preview.changes.length) { showNotice('These settings are already in effect.', 'info'); return; }
-    $('changes').replaceChildren();
-    for (const item of preview.changes) {
-      const row = el('div', 'change');
-      row.append(el('strong', '', item.label), el('span', 'from', item.from), el('span', 'to', item.to));
-      $('changes').append(row);
-    }
-    $('modal').classList.remove('hidden');
-    $('apply').focus();
+    openReview({ changes: preview.changes, onApply: async () => { await api.apply(current.root, proposed); await render(current.root); showNotice('Switch applied.', 'info'); } });
   } catch (error) { showError(error); }
 });
+
+// One review sheet for every write: repository switches, folder rules and their removal.
+let pendingApply = null;
+function openReview({ title = 'Apply these changes?', help = 'Only this repository’s local Git config is written. You can switch back at any time.', applyLabel = 'Apply switch', changes, onApply }) {
+  text('modal-title', title);
+  $('modal-help').textContent = help;
+  $('apply').textContent = applyLabel;
+  $('changes').replaceChildren();
+  for (const item of changes) {
+    const row = el('div', 'change');
+    row.append(el('strong', '', item.label), el('span', 'from', tildeAll(item.from)), el('span', 'to', tildeAll(item.to)));
+    $('changes').append(row);
+  }
+  pendingApply = onApply;
+  $('modal').classList.remove('hidden');
+  $('apply').focus();
+}
 const close = () => $('modal').classList.add('hidden');
 $('close').addEventListener('click', close);
 $('cancel').addEventListener('click', close);
 $('modal').addEventListener('click', event => { if (event.target === $('modal')) close(); });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('modal').classList.contains('hidden')) close(); });
 $('apply').addEventListener('click', () => busy($('apply'), async () => {
-  try { await api.apply(current.root, proposed); close(); await render(current.root); showNotice('Switch applied.', 'info'); }
+  try { await pendingApply(); close(); }
   catch (error) { close(); showError(error); }
 }));
+
+/* Folder rules */
+
+let folderRules = [];
+let editingRule = null;
+
+function profileOptions(select, emptyLabel) {
+  select.replaceChildren(new Option(emptyLabel, ''));
+  const group = (label, options) => {
+    if (!options.length) return;
+    const node = document.createElement('optgroup'); node.label = label;
+    for (const [name, value] of options) node.append(new Option(name, value));
+    select.append(node);
+  };
+  group('SSH', knownProfiles.sshHosts.filter(host => knownProfiles.hostTargets[host] && knownProfiles.hostTargets[host] !== host)
+    .map(host => [`${host} · ${knownProfiles.hostTargets[host]}`, `ssh:${host}`]));
+  group('HTTPS', knownProfiles.httpsProfiles.map(profile => [`${profile.username} · ${profile.host}`, `https:${profile.id}`]));
+}
+
+const ruleTargetValue = target => !target ? '' : target.type === 'ssh' ? `ssh:${target.value}` : `https:${target.host}:${target.value}`;
+const ruleSummary = rule => [rule.name, rule.email, rule.target && (rule.target.type === 'ssh' ? `SSH · ${rule.target.value}` : `HTTPS · ${rule.target.value}`)].filter(Boolean).join(' · ') || 'No identity or sign-in in this file';
+
+function renderFolders() {
+  const list = $('folder-list');
+  list.replaceChildren();
+  if (!folderRules.length) list.append(el('p', 'profile-empty', 'No folder rules yet.'));
+  for (const rule of folderRules) {
+    const node = el('div', 'profile-row');
+    const badge = el('span', 'profile-icon'); badge.append(icon('folder'));
+    const copy = el('div');
+    const title = el('strong', '', tilde(rule.folder || rule.condition));
+    if (!rule.managed) title.append(el('span', 'rule-tag', 'Hand-written'));
+    copy.append(title, el('span', '', rule.exists ? ruleSummary(rule) : `Missing file: ${tilde(rule.file)}`));
+    node.append(badge, copy);
+    if (rule.managed) {
+      const actions = el('div', 'row-actions');
+      actions.append(iconButton('edit', `Edit the rule for ${tilde(rule.folder)}`, () => editFolderRule(rule)),
+        iconButton('close', `Remove the rule for ${tilde(rule.folder)}`, () => openReview({
+          title: 'Remove this folder rule?', applyLabel: 'Remove rule',
+          help: 'Repositories in this folder go back to your global identity and sign-in, unless they have their own.',
+          changes: [{ label: 'Global Git config', from: `includeIf "${rule.condition}"`, to: '(removed)' }, { label: 'Rule file', from: tilde(rule.file), to: '(deleted)' }],
+          onApply: async () => { folderRules = await api.removeFolderRule(rule.condition); if (editingRule?.condition === rule.condition) resetFolderForm(); renderFolders(); showNotice('Folder rule removed.', 'info'); }
+        })));
+      node.append(actions);
+    }
+    list.append(node);
+  }
+}
+
+async function refreshFolders() {
+  await refreshProfiles();
+  const selected = $('folder-target').value;
+  profileOptions($('folder-target'), 'Identity only');
+  $('folder-target').value = selected;
+  folderRules = await api.folderRules();
+  renderFolders();
+}
+
+function resetFolderForm() {
+  editingRule = null;
+  for (const id of ['folder-path', 'folder-name', 'folder-email']) $(id).value = '';
+  $('folder-target').value = '';
+  $('folder-path').disabled = false; $('folder-browse').disabled = false;
+  text('folder-form-title', 'New folder rule');
+  $('folder-new').classList.add('hidden');
+}
+
+function editFolderRule(rule) {
+  editingRule = rule;
+  $('folder-path').value = tilde(rule.folder);
+  $('folder-name').value = rule.name || '';
+  $('folder-email').value = rule.email || '';
+  $('folder-target').value = ruleTargetValue(rule.target);
+  $('folder-path').disabled = true; $('folder-browse').disabled = true;
+  text('folder-form-title', `Edit rule for ${tilde(rule.folder)}`);
+  $('folder-new').classList.remove('hidden');
+}
+
+$('folder-browse').addEventListener('click', async () => { const folder = await api.pickFolder(); if (folder) $('folder-path').value = folder; });
+$('folder-new').addEventListener('click', resetFolderForm);
+$('folder-preview').addEventListener('click', () => busy($('folder-preview'), async () => {
+  clearError();
+  try {
+    const [type, ...rest] = $('folder-target').value.split(':');
+    const request = { folder: editingRule ? editingRule.folder : $('folder-path').value.replace(/^~(?=$|[\\/])/, home), name: $('folder-name').value, email: $('folder-email').value,
+      target: type ? { type, value: rest.join(':') } : null };
+    const plan = await api.previewFolderRule(request);
+    if (!plan.changes.length) { showNotice('This folder rule is already in effect.', 'info'); return; }
+    openReview({ title: plan.isNew ? `Add a rule for ${tilde(plan.folder)}?` : `Update the rule for ${tilde(plan.folder)}?`, applyLabel: plan.isNew ? 'Add folder rule' : 'Update rule',
+      help: plan.isNew ? `One includeIf line is added to your global Git config, pointing to ${tilde(plan.file)}. Remove the rule here to undo it.` : `Only ${tilde(plan.file)} is rewritten.`,
+      changes: plan.changes,
+      onApply: async () => { folderRules = await api.applyFolderRule(request); editFolderRule(folderRules.find(rule => rule.condition === plan.condition)); renderFolders(); showNotice(`Repositories in ${tilde(plan.folder)} now use this account.`, 'info'); } });
+  } catch (error) { showError(error); }
+}));
+$('use-for-folder').addEventListener('click', async () => {
+  if (!current) return;
+  const parent = current.root.replace(/[\\/][^\\/]+$/, '');
+  const [name, email, target] = [$('new-name').value, $('new-email').value, $('new-target').value];
+  showView('folders');
+  await refreshFolders().catch(showError);
+  resetFolderForm();
+  const existing = folderRules.find(rule => rule.managed && rule.folder === parent);
+  if (existing) editFolderRule(existing);
+  $('folder-path').value = tilde(parent);
+  $('folder-name').value = name; $('folder-email').value = email;
+  // The repository's picker holds ssh:alias or https:username; map HTTPS to the saved profile id.
+  $('folder-target').value = target.startsWith('https:') ? `https:${current.hostname}:${target.slice(6)}` : target;
+});
 
 /* Navigation and start-up */
 
 $('nav-watchlist').addEventListener('click', () => showView('watchlist'));
 $('nav-new-profile').addEventListener('click', () => showView('new-profile'));
+$('nav-folders').addEventListener('click', () => showView('folders'));
 $('nav-overview').addEventListener('click', () => showView('overview'));
 $('nav-repository').addEventListener('click', () => { if (current) showView('repository'); });
 $('back-overview').addEventListener('click', () => showView('overview'));
