@@ -6,6 +6,7 @@ const core = require('./core.cjs');
 const { createFavorites } = require('./favorites.cjs');
 const { createSshProfile } = require('./ssh-setup.cjs');
 const { createHttpsProfiles } = require('./https-setup.cjs');
+const { createFolderRules } = require('./folder-rules.cjs');
 const { providers, settingsPages } = require('./providers.cjs');
 
 // macOS gets a translucent window with native vibrancy under the sidebar; Windows 11 gets Mica.
@@ -39,6 +40,7 @@ app.whenReady().then(() => {
   });
   const favorites = createFavorites(path.join(app.getPath('userData'), 'favorites.json'));
   const httpsProfiles = createHttpsProfiles(path.join(app.getPath('userData'), 'https-profiles.json'));
+  const folderRules = createFolderRules({ listHttpsProfiles: () => httpsProfiles.list() });
   ipcMain.handle('pick-folder', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0];
@@ -60,6 +62,10 @@ app.whenReady().then(() => {
   ipcMain.handle('favorites-list', () => favorites.list());
   ipcMain.handle('favorites-add', async (_event, folder) => favorites.add((await core.inspect(folder)).root));
   ipcMain.handle('favorites-remove', (_event, root) => favorites.remove(root));
+  ipcMain.handle('folder-rules', () => folderRules.list());
+  ipcMain.handle('folder-rule-preview', (_event, request) => folderRules.preview(request));
+  ipcMain.handle('folder-rule-apply', (_event, request) => folderRules.apply(request));
+  ipcMain.handle('folder-rule-remove', (_event, condition) => folderRules.remove(condition));
   ipcMain.handle('connection-check', (_event, folder, kind) => core.checkConnection(folder, kind));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

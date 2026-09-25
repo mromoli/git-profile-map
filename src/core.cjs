@@ -98,29 +98,78 @@ function redactUrl(value) {
 
 const hasEmbeddedSecret = value => { try { return Boolean(new URL(value).password); } catch { return false; } };
 
+const expandHome = value => value.replace(/^~(?=$|[\\/])/, os.homedir());
+
+// Where an include line points, resolved like Git does: ~ is the home folder and a relative
+// path is relative to the file that contains the include.
+function includedFile(value, source, cwd) {
+  const file = expandHome(value);
+  return path.isAbsolute(file) ? path.normalize(file) : path.resolve(path.dirname(path.resolve(cwd, source.replace(/^file:/, ''))), file);
+}
+
+// Include lines, with the condition for includeIf ones. Git lists them even when the condition
+// does not match, but a setting can only come from an included file whose include matched.
+function includeRules(entries, cwd) {
+  return entries.flatMap(({ source, entry }) => {
+    const [key, value] = entry.split('\n');
+    const match = key.match(/^include(?:if\.(.+))?\.path$/);
+    return match && value ? [{ condition: match[1] || null, file: includedFile(value, source, cwd), includedFrom: source.replace(/^file:/, '') }] : [];
+  });
+}
+
+// Adds `via` to a config record when its file was pulled in by an include line, so the window can
+// say "global, via ~/work.gitconfig" or "folder rule ~/Work/" instead of just the scope.
+function withVia(record, includes, cwd) {
+  if (!record?.source?.startsWith('file:')) return record;
+  const file = path.resolve(cwd, record.source.slice(5));
+  const via = includes.filter(x => x.file === file).at(-1);
+  return via ? { ...record, via } : record;
+}
+
+// The URL Git really uses once url.<base>.insteadOf rules are applied.
+async function effectiveUrl(cwd, push) {
+  try { return await run('git', ['remote', 'get-url', ...(push ? ['--push'] : []), 'origin'], cwd); }
+  catch { return null; }
+}
+
+function rewriteSource(entries, raw, effective, push) {
+  if (!raw || !effective || raw === effective) return null;
+  const keys = push ? ['pushinsteadof', 'insteadof'] : ['insteadof'];
+  const rule = entries.filter(({ entry }) => {
+    const [key, value] = entry.split('\n');
+    const match = key.match(/^url\.(.+)\.([a-z]+)$/);
+    return match && keys.includes(match[2]) && effective.startsWith(match[1]) && raw.startsWith(value);
+  }).at(-1);
+  return { from: raw, source: rule?.source || null };
+}
+
 async function inspectRaw(folder) {
   if (typeof folder !== 'string' || !folder.trim()) throw new Error('Choose a repository folder.');
-  const input = path.resolve(folder.replace(/^~(?=$|[\\/])/, os.homedir()));
+  const input = path.resolve(expandHome(folder));
   const stat = await fs.stat(input).catch(() => null);
   if (!stat?.isDirectory()) throw new Error('That folder does not exist.');
   let root;
   try { root = await run('git', ['rev-parse', '--show-toplevel'], input); }
   catch { throw new Error('This folder is not inside a Git repository.'); }
-  const [name, email, origin, pushUrl, credentialHelper, coreSshCommand, entries] = await Promise.all([
-    configValue(input, 'user.name'), configValue(input, 'user.email'), configValue(input, 'remote.origin.url'),
-    configValue(input, 'remote.origin.pushurl'), configValue(input, 'credential.helper'),
-    configValue(input, 'core.sshCommand'), configList(input)
+  const [records, entries, effectiveOrigin, effectivePushUrl] = await Promise.all([
+    Promise.all(['user.name', 'user.email', 'remote.origin.url', 'remote.origin.pushurl', 'credential.helper', 'core.sshCommand'].map(key => configValue(input, key))),
+    configList(input), effectiveUrl(input, false), effectiveUrl(input, true)
   ]);
-  const remote = parseRemote(origin?.value);
-  const pushRemote = pushUrl ? parseRemote(pushUrl.value) : null;
+  const includes = includeRules(entries, input);
+  const [name, email, origin, pushUrl, credentialHelper, coreSshCommand] = records.map(record => withVia(record, includes, input));
+  const effectivePush = pushUrl ? effectivePushUrl || pushUrl.value : null;
+  const remote = parseRemote(effectiveOrigin || origin?.value);
+  const pushRemote = pushUrl ? parseRemote(effectivePush) : null;
   const [ssh, pushSsh] = await Promise.all([
     remote.method === 'ssh' ? sshResolution(remote.host) : null,
     pushRemote?.method === 'ssh' ? sshResolution(pushRemote.host) : null
   ]);
   const hostname = remoteHostname(remote, ssh);
-  const credentialUser = hostname ? await configValue(input, credentialUserKey(hostname)) : null;
+  const credentialUser = hostname ? withVia(await configValue(input, credentialUserKey(hostname)), includes, input) : null;
   const httpsUser = remote.method === 'https' ? remote.user || credentialUser?.value || null : null;
   return { root, name, email, origin, pushUrl, pushRemote, pushSsh, credentialHelper, coreSshCommand, remote, ssh, hostname, credentialUser, httpsUser,
+    effectiveOrigin: effectiveOrigin || origin?.value || null, effectivePush,
+    originRewrite: withVia(rewriteSource(entries, origin?.value, effectiveOrigin, false), includes, input),
     pushUrlCount: entries.filter(x => x.entry.startsWith('remote.origin.pushurl\n')).length,
     conditionalIncludes: entries.filter(x => x.entry.startsWith('includeif.')).map(x => ({ source: x.source, rule: x.entry })) };
 }
@@ -128,7 +177,8 @@ async function inspectRaw(folder) {
 async function inspect(folder) {
   const raw = await inspectRaw(folder);
   const redact = record => record && { ...record, value: redactUrl(record.value) };
-  return { ...raw, origin: redact(raw.origin), pushUrl: redact(raw.pushUrl),
+  return { ...raw, origin: redact(raw.origin), pushUrl: redact(raw.pushUrl), effectiveOrigin: redactUrl(raw.effectiveOrigin), effectivePush: redactUrl(raw.effectivePush),
+    originRewrite: raw.originRewrite && { ...raw.originRewrite, from: redactUrl(raw.originRewrite.from) },
     embeddedSecret: hasEmbeddedSecret(raw.origin?.value) || hasEmbeddedSecret(raw.pushUrl?.value) };
 }
 
@@ -222,7 +272,8 @@ function switchPreview(state, request) {
     { label: 'Commit email', key: 'user.email', from: current.email?.value, to: email }
   ];
   const retarget = (remote, value) => target.transport.url(remote, target.value, value, current.hostname);
-  const newRemote = target ? retarget(current.remote, current.origin.value) : current.origin?.value;
+  // Retarget from the URL Git really uses, so a folder rule's insteadOf rewrite is carried over.
+  const newRemote = target ? retarget(current.remote, current.effectiveOrigin || current.origin.value) : current.origin?.value;
   if (target) {
     changes.push({ label: 'Origin remote', key: 'remote.origin.url', from: current.origin.value, to: newRemote });
     if (current.pushUrl) {
@@ -230,7 +281,7 @@ function switchPreview(state, request) {
       if (current.pushUrl.scope !== 'local') throw new Error(`Origin's push URL is set in ${current.pushUrl.source.replace(/^file:/, '')}. Change it there first.`);
       if (!['ssh', 'https'].includes(current.pushRemote?.method) || remoteHostname(current.pushRemote, current.pushSsh) !== current.hostname)
         throw new Error('Origin pushes to a different Git host than it fetches from. Update the push URL manually.');
-      changes.push({ label: 'Push URL', key: 'remote.origin.pushurl', from: current.pushUrl.value, to: retarget(current.pushRemote, current.pushUrl.value) });
+      changes.push({ label: 'Push URL', key: 'remote.origin.pushurl', from: current.pushUrl.value, to: retarget(current.pushRemote, current.effectivePush || current.pushUrl.value) });
     }
     changes.push(...target.transport.writes(current, target.value));
   }
@@ -276,4 +327,4 @@ async function applySwitch(folder, request) {
   return inspect(current.root);
 }
 
-module.exports = { inspect, profiles, switchPreview, applySwitch, checkConnection, classifyProbe, parseRemote, parseSshG, redactUrl };
+module.exports = { inspect, profiles, switchPreview, applySwitch, checkConnection, classifyProbe, parseRemote, parseSshG, redactUrl, run, sshResolution, expandHome };

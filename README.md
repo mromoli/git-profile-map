@@ -13,6 +13,7 @@ Git Profile Map is a small desktop app for people with more than one Git account
 - **Shows the real answer, not a guess.** Name, email, remote and SSH key are read the same way Git and OpenSSH resolve them, including folder rules (`includeIf`), `Include`d SSH config files, and push URLs.
 - **One profile per account.** Each profile is either its own SSH key or an HTTPS login, for GitHub, GitLab or Bitbucket.
 - **Safe switching.** Every change is shown before it is written, only to that repository's local config, and rolled back if anything fails. A switch can move a repository from HTTPS to SSH or back.
+- **Folder rules.** Give every repository in a folder, such as `~/Work`, the same account, including ones you haven't cloned yet. A plain `git clone git@github.com:…` inside that folder already uses the right key.
 - **Watchlist.** Keep an eye on the repositories you care about: the app checks each one when it opens and every five minutes. It tells an expired login apart from a network problem.
 - **Local only.** Private keys never leave `~/.ssh`, tokens go straight to your system keychain, and nothing is uploaded anywhere.
 
@@ -55,11 +56,22 @@ Creating a profile doesn't change any repository. Open a repository and pick a p
 
 ### What a switch writes
 
-After you confirm, the app writes `user.name` and `user.email` to the repository's local Git config. If you picked a profile, it also rewrites `origin` (and its push URL, if one is set), either to that SSH alias or to a clean HTTPS URL plus a local `credential.https://<host>.username`. It never touches your SSH config or global Git config, and a failed switch restores every value it changed.
+After you confirm, the app writes `user.name` and `user.email` to the repository's local Git config. If you picked a profile, it also rewrites `origin` (and its push URL, if one is set), either to that SSH alias or to a clean HTTPS URL plus a local `credential.https://<host>.username`. A switch never touches your SSH config or global Git config, and a failed switch restores every value it changed.
+
+### What a folder rule writes
+
+A switch needs the repository on disk already. A folder rule covers everything inside a folder instead, including repositories you clone later. After you confirm, the app:
+
+- writes a small file of its own, `~/.config/git-profile-map/folders/<folder>-<id>.gitconfig`, with `user.name`, `user.email` and the sign-in:
+  - an SSH profile adds `url."git@github-work:".insteadOf` for `git@github.com:` and `ssh://git@github.com/`, so remotes for that host go through the profile's key without being edited.
+  - an HTTPS profile adds `credential.https://<host>.username`.
+- adds one `[includeIf "gitdir:<folder>/"]` line pointing to that file to your global Git config. This is the only time the app writes to global config.
+
+A repository's own local settings still win over the folder rule, so you can still switch a single repository to another profile. Editing a rule rewrites only its file, and removing it deletes both the include line and the file. Rules you wrote by hand are listed but never changed.
 
 ### What it reads
 
-- Effective `user.name`, `user.email`, origin and push URLs, credential helper and `core.sshCommand`, with the file and scope Git reports for each.
+- Effective `user.name`, `user.email`, origin and push URLs (after any `insteadOf` rewrite), credential helper and `core.sshCommand`, with the file and scope Git reports for each, and the `include` or folder rule that pulled that file in.
 - OpenSSH's resolved host, user and identity files from `ssh -G`.
 - `Host` aliases in `~/.ssh/config` and the files it `Include`s.
 

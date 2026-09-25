@@ -25,6 +25,7 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10Z"/></symbol>
     <symbol id="i-auto" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="11.5" rx="2"/><path d="M9 20h6m-3-3.5V20"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M14.5 5.5 18.5 9.5M4.5 19.5l1-4.5L16 4.5a1.4 1.4 0 0 1 2 0l1.5 1.5a1.4 1.4 0 0 1 0 2L9 18.5z"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
   </svg>
 
@@ -35,6 +36,7 @@
         <button class="nav selected" id="nav-overview"><svg><use href="#i-search"/></svg>Inspect</button>
         <button class="nav" id="nav-watchlist"><svg><use href="#i-star"/></svg>Watchlist<span class="nav-count" id="watch-count">0</span></button>
         <button class="nav" id="nav-new-profile"><svg><use href="#i-key"/></svg>Profiles</button>
+        <button class="nav" id="nav-folders"><svg><use href="#i-folder"/></svg>Folders</button>
         <button class="nav hidden" id="nav-repository"><svg><use href="#i-repo"/></svg><span class="nav-label" id="nav-repository-label">Repository</span></button>
       </nav>
       <div class="sidebar-spacer"></div>
@@ -140,6 +142,36 @@
         </div>
       </section>
 
+      <section id="folders-view" class="view hidden">
+        <header class="page-head">
+          <div><p class="kicker">Folder rules</p><h1>Folders</h1><p class="lede">Give every repository in a folder the same account, including ones you clone later. A repository’s own switch still takes priority.</p></div>
+        </header>
+
+        <div class="profile-layout">
+          <div class="glass panel">
+            <h3 id="folder-form-title">New folder rule</h3>
+            <div class="path-field">
+              <label class="field">Folder<input id="folder-path" placeholder="~/Work" spellcheck="false" autocomplete="off"></label>
+              <button class="secondary" id="folder-browse">Browse…</button>
+            </div>
+            <div class="field-row">
+              <label class="field">Commit name<input id="folder-name" autocomplete="off"></label>
+              <label class="field">Commit email<input id="folder-email" type="email" autocomplete="off"></label>
+            </div>
+            <label class="field">Sign-in profile<select id="folder-target"><option value="">Identity only</option></select></label>
+            <p class="help" id="folder-help">An SSH profile redirects git@host remotes in this folder to its key, so plain clone commands use the right account. An HTTPS profile picks which saved login Git uses.</p>
+            <button class="primary wide" id="folder-preview">Review changes<svg><use href="#i-arrow"/></svg></button>
+            <button class="link hidden" id="folder-new">Start a new rule instead</button>
+          </div>
+
+          <div class="glass panel">
+            <h3>Folder rules</h3>
+            <p class="help">From <code>includeIf "gitdir:…"</code> lines in your global Git config.</p>
+            <div id="folder-list" class="profile-list"></div>
+          </div>
+        </div>
+      </section>
+
       <section id="results" class="view hidden">
         <button class="link back" id="back-overview"><svg><use href="#i-back"/></svg>Inspect another folder</button>
         <header class="page-head">
@@ -183,6 +215,7 @@
             <label class="field">Sign-in profile<select id="new-target"><option value="">Keep current sign-in</option></select></label>
             <p class="help" id="host-help"></p>
             <button class="primary wide" id="preview">Review changes<svg><use href="#i-arrow"/></svg></button>
+            <button class="link" id="use-for-folder">Use this account for the whole folder instead…</button>
           </section>
           <section class="glass panel">
             <h3>Where settings come from</h3>
@@ -199,7 +232,7 @@
       <button class="icon-button close" id="close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
       <p class="kicker">Review</p>
       <h2 id="modal-title">Apply these changes?</h2>
-      <p class="help">Only this repository’s local Git config is written. You can switch back at any time.</p>
+      <p class="help" id="modal-help">Only this repository’s local Git config is written. You can switch back at any time.</p>
       <div id="changes"></div>
       <div class="actions end"><button class="secondary" id="cancel">Cancel</button><button class="primary" id="apply">Apply switch</button></div>
     </div>
