@@ -1,5 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('profileMap', {
+  appearance: () => ipcRenderer.invoke('appearance'),
+  setTheme: theme => ipcRenderer.invoke('theme-set', theme),
+  providers: () => ipcRenderer.invoke('providers'),
   pickFolder: () => ipcRenderer.invoke('pick-folder'),
   inspect: folder => ipcRenderer.invoke('inspect', folder),
   profiles: () => ipcRenderer.invoke('profiles'),

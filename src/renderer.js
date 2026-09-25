@@ -1,82 +1,136 @@
 const $ = id => document.getElementById(id);
+const api = window.profileMap;
 let current = null;
 let proposed = null;
 let createdProfile = null;
+let providers = {};
+let knownProfiles = { sshHosts: [], hostTargets: {}, httpsProfiles: [] };
 let watchPaths = [];
 const watchStatuses = new Map();
 const watchProfiles = new Map();
 const checking = new Set();
 const text = (id, value) => { $(id).textContent = value || '—'; };
 const sourceName = record => record ? `${record.scope} · ${record.source.replace(/^file:/, '')}` : 'No setting found';
-const showError = error => { $('notice').textContent = error.message || String(error); $('notice').classList.remove('hidden'); };
+const baseName = root => root.split(/[\\/]/).filter(Boolean).at(-1) || root;
+const showNotice = (message, kind = 'error') => { $('notice').textContent = message; $('notice').classList.toggle('info', kind === 'info'); $('notice').classList.remove('hidden'); };
+const showError = error => showNotice(error.message || String(error));
 const clearError = () => $('notice').classList.add('hidden');
+
+function el(tag, className, content) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (content !== undefined) node.textContent = content;
+  return node;
+}
+
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+function iconButton(name, label, onClick) {
+  const button = el('button', 'icon-button');
+  button.title = label; button.setAttribute('aria-label', label);
+  button.append(icon(name));
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+async function busy(button, task) {
+  button.disabled = true;
+  try { return await task(); } finally { button.disabled = false; }
+}
 
 function showView(view) {
   $('overview-view').classList.toggle('hidden', view !== 'overview');
   $('watchlist').classList.toggle('hidden', view !== 'watchlist');
   $('new-profile-view').classList.toggle('hidden', view !== 'new-profile');
   $('results').classList.toggle('hidden', view !== 'repository');
-  for (const [name, id] of [['overview', 'nav-overview'], ['watchlist', 'nav-watchlist'], ['new-profile', 'nav-new-profile'], ['repository', 'nav-repository']]) {
+  for (const [name, id] of [['overview', 'nav-overview'], ['watchlist', 'nav-watchlist'], ['new-profile', 'nav-new-profile'], ['repository', 'nav-repository']])
     $(id).classList.toggle('selected', view === name);
-  }
   clearError();
-  window.scrollTo(0, 0);
+  $('main').scrollTo(0, 0);
+  if (view === 'new-profile') refreshProfiles().then(renderProfileList).catch(showError);
 }
 
-function statusClass(status) { return status?.state || 'unchecked'; }
-function statusLabel(status) { return status?.title || 'Not checked'; }
-function formatTime(status) { return status?.checkedAt ? `Checked ${new Date(status.checkedAt).toLocaleString()}` : 'No recent check'; }
+async function refreshProfiles() {
+  knownProfiles = await api.profiles();
+  return knownProfiles;
+}
+
+/* Watchlist */
+
+const statusClass = status => status?.state || 'unchecked';
+const statusLabel = status => status?.title || 'Not checked';
+const formatTime = status => status?.checkedAt ? `Checked ${new Date(status.checkedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'No recent check';
+
+function signInSummary(config) {
+  if (config.remote.method === 'ssh') return `SSH · ${config.remote.host}`;
+  if (config.remote.method === 'https') return `HTTPS · ${config.httpsUser || 'no account set'}`;
+  return null;
+}
 
 function renderWatchlist() {
-  $('watch-count').textContent = String(watchPaths.length);
+  $('watch-count').textContent = watchPaths.length ? String(watchPaths.length) : '';
   $('watch-items').replaceChildren();
   if (!watchPaths.length) {
-    const empty = document.createElement('p'); empty.className = 'watch-empty';
-    empty.textContent = 'No saved repositories yet. Inspect a folder, then choose “Save to watchlist”.';
-    $('watch-items').append(empty);
+    $('watch-items').append(el('p', 'watch-empty', 'No saved repositories yet. Inspect a folder, then choose “Save to watchlist”.'));
   }
   for (const root of watchPaths) {
-    const item = document.createElement('article'); item.className = 'watch-item';
-    const left = document.createElement('div'); left.className = 'watch-main';
-    const title = document.createElement('strong'); title.textContent = root.split(/[\\/]/).filter(Boolean).at(-1) || root;
-    const location = document.createElement('span'); location.textContent = root;
-    const profile = document.createElement('span'); profile.className = 'watch-profile';
+    const item = el('article', 'watch-item');
+    const main = el('div', 'watch-main');
     const config = watchProfiles.get(root);
-    profile.textContent = config ? `Profile: ${config.name?.value || 'No commit name'} · ${config.email?.value || 'No commit email'}${config.remote.method === 'ssh' ? ` · SSH: ${config.remote.host}` : ''}` : watchProfiles.has(root) ? 'Profile unavailable' : 'Reading Git profile…';
+    const profile = config
+      ? [config.name?.value || 'No commit name', config.email?.value || 'No commit email', signInSummary(config)].filter(Boolean).join(' · ')
+      : watchProfiles.has(root) ? 'Profile unavailable' : 'Reading Git profile…';
     const status = watchStatuses.get(root);
-    const badge = document.createElement('span'); badge.className = `watch-badge ${statusClass(status)}`;
-    badge.textContent = checking.has(root) ? 'Checking…' : statusLabel(status);
-    const time = document.createElement('small'); time.textContent = status?.detail ? `${status.detail} · ${formatTime(status)}` : formatTime(status);
-    left.append(title, location, profile, time);
-    const actions = document.createElement('div'); actions.className = 'watch-actions';
-    const open = document.createElement('button'); open.className = 'secondary'; open.textContent = 'Open';
+    main.append(el('strong', '', baseName(root)), el('span', 'watch-profile', profile), el('span', '', root),
+      el('small', '', status?.detail ? `${status.detail} · ${formatTime(status)}` : formatTime(status)));
+    const actions = el('div', 'watch-actions');
+    const badge = el('span', `watch-badge ${statusClass(status)}`, checking.has(root) ? 'Checking…' : statusLabel(status));
+    const open = el('button', 'secondary', 'Open');
     open.addEventListener('click', async () => { try { await render(root); } catch (error) { showError(error); } });
-    const refresh = document.createElement('button'); refresh.className = 'icon-button'; refresh.title = 'Check connection'; refresh.setAttribute('aria-label', `Check ${title.textContent}`); refresh.textContent = '↻';
-    refresh.addEventListener('click', () => checkOne(root));
-    const remove = document.createElement('button'); remove.className = 'icon-button'; remove.title = 'Remove from watchlist'; remove.setAttribute('aria-label', `Remove ${title.textContent}`); remove.textContent = '×';
-    remove.addEventListener('click', async () => { try { watchPaths = await window.profileMap.favoriteRemove(root); watchStatuses.delete(root); watchProfiles.delete(root); renderWatchlist(); updateFavoriteButton(); } catch (error) { showError(error); } });
-    actions.append(badge, open, refresh, remove); item.append(left, actions); $('watch-items').append(item);
+    const refresh = iconButton('refresh', `Check ${baseName(root)}`, () => checkOne(root));
+    const remove = iconButton('close', `Remove ${baseName(root)} from watchlist`, async () => {
+      try { watchPaths = await api.favoriteRemove(root); watchStatuses.delete(root); watchProfiles.delete(root); renderWatchlist(); }
+      catch (error) { showError(error); }
+    });
+    actions.append(badge, open, refresh, remove);
+    item.append(main, actions);
+    $('watch-items').append(item);
   }
   updateFavoriteButton();
 }
 
 async function refreshWatchProfile(root) {
-  try { watchProfiles.set(root, await window.profileMap.inspect(root)); }
+  try { watchProfiles.set(root, await api.inspect(root)); }
   catch { watchProfiles.set(root, null); }
   renderWatchlist();
 }
 
 function updateFavoriteButton() {
   if (!current) return;
-  $('favorite').textContent = watchPaths.includes(current.root) ? '★ Saved to watchlist' : '☆ Save to watchlist';
+  const saved = watchPaths.includes(current.root);
+  $('favorite').classList.toggle('saved', saved);
+  $('favorite').querySelector('span').textContent = saved ? 'Saved to watchlist' : 'Save to watchlist';
+}
+
+function showConnection(status) {
+  document.querySelector('.connection-panel').dataset.state = status.state;
+  text('connection-title', status.title);
+  $('connection-detail').textContent = status.detail || '';
+  $('connection-time').textContent = status.checkedAt ? formatTime(status) : '';
 }
 
 async function checkOne(root, kind = 'read') {
   if (checking.has(root)) return;
   checking.add(root); renderWatchlist();
-  if (current?.root === root) { text('connection-title', 'Checking…'); text('connection-detail', 'Contacting the configured remote without an interactive prompt.'); }
+  if (current?.root === root) showConnection({ state: 'checking', title: kind === 'push' ? 'Testing push…' : 'Checking…', detail: 'Contacting the remote without any sign-in prompt.' });
   try {
-    const result = await window.profileMap.checkConnection(root, kind);
+    const result = await api.checkConnection(root, kind);
     watchStatuses.set(root, result);
     if (current?.root === root) showConnection(result);
   } catch (error) {
@@ -86,142 +140,259 @@ async function checkOne(root, kind = 'read') {
   } finally { checking.delete(root); renderWatchlist(); }
 }
 
-function showConnection(status) {
-  const panel = document.querySelector('.connection-panel');
-  panel.dataset.state = status.state;
-  text('connection-title', status.title);
-  text('connection-detail', status.detail);
-  text('connection-time', formatTime(status));
-}
-
 async function checkAll() {
-  $('refresh-all').disabled = true;
-  try {
+  await busy($('refresh-all'), async () => {
     const queue = [...watchPaths];
     await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
       while (queue.length) await checkOne(queue.shift());
     }));
-  } finally { $('refresh-all').disabled = false; }
+  });
 }
 
+/* Repository */
+
 function addOrigin(label, value) {
-  const row = document.createElement('div');
-  row.className = 'origin-row';
-  const name = document.createElement('strong');
-  const detail = document.createElement('span');
-  name.textContent = label;
-  detail.textContent = value;
-  row.append(name, detail);
+  const row = el('div', 'origin-row');
+  row.append(el('strong', '', label), el('span', '', value));
   $('origins').append(row);
+}
+
+function renderSignIn(data) {
+  const method = data.remote.method;
+  text('auth-method', ({ ssh: 'SSH', https: 'HTTPS', local: 'LOCAL', none: 'NONE' })[method]);
+  text('remote-url', data.origin?.value || 'No origin configured');
+  $('ssh-target').textContent = ''; $('ssh-key').textContent = ''; $('auth-detail').textContent = '';
+  if (method === 'ssh') {
+    text('ssh-host', data.remote.host);
+    if (data.ssh?.hostname) $('ssh-target').textContent = `Connects to ${data.ssh.user}@${data.ssh.hostname}`;
+    $('ssh-key').textContent = data.ssh?.identityFiles?.length ? `Key: ${data.ssh.identityFiles.join(', ')}` : 'No SSH key resolved';
+    if (data.coreSshCommand) $('auth-detail').textContent = `SSH command override: ${data.coreSshCommand.value}`;
+  } else if (method === 'https') {
+    text('ssh-host', data.httpsUser || 'No account chosen');
+    $('ssh-target').textContent = data.httpsUser ? `Signs in to ${data.remote.host} as ${data.httpsUser}` : `The credential helper picks any saved login for ${data.remote.host}`;
+    $('auth-detail').textContent = `Credential helper: ${data.credentialHelper?.value || 'not configured'}`;
+  } else {
+    text('ssh-host', method === 'local' ? 'Local path' : 'No origin remote');
+  }
+}
+
+function renderTargets(data) {
+  const select = $('new-target');
+  select.replaceChildren(new Option('Keep current sign-in', ''));
+  const hostname = data.hostname;
+  const ssh = knownProfiles.sshHosts.filter(host => knownProfiles.hostTargets[host] === hostname);
+  const https = knownProfiles.httpsProfiles.filter(profile => profile.host === hostname);
+  const group = (label, options) => {
+    if (!options.length) return;
+    const node = document.createElement('optgroup'); node.label = label;
+    for (const [name, value] of options) node.append(new Option(name, value));
+    select.append(node);
+  };
+  group('SSH', ssh.map(host => [host, `ssh:${host}`]));
+  group('HTTPS', https.map(profile => [`${profile.username} (HTTPS)`, `https:${profile.username}`]));
+  const count = ssh.length + https.length;
+  select.disabled = !hostname || !count;
+  $('host-help').textContent = !hostname ? 'Add an SSH or HTTPS origin to use a sign-in profile.'
+    : !count ? `No profile for ${hostname} yet. Create one under Profiles.`
+    : `Profiles for ${hostname}. Switching can convert between SSH and HTTPS.`;
 }
 
 async function render(folder) {
   clearError();
-  const data = await window.profileMap.inspect(folder);
+  const data = await api.inspect(folder);
   current = data;
   if (watchPaths.includes(data.root)) watchProfiles.set(data.root, data);
   updateFavoriteButton();
   $('path').value = data.root;
-  text('path-hint', 'Folder resolved');
-  text('repo-name', data.root.split(/[\\/]/).filter(Boolean).at(-1));
+  text('path-hint', 'Repository found');
+  text('repo-name', baseName(data.root));
+  $('nav-repository-label').textContent = baseName(data.root);
   text('repo-path', data.root);
   text('identity-name', data.name?.value || 'No name set');
   text('identity-email', data.email?.value || 'No email set');
-  text('identity-source', `Name: ${data.name?.scope || 'unset'} · Email: ${data.email?.scope || 'unset'}`);
-  const method = data.remote.method;
-  text('auth-method', ({ ssh: 'SSH', https: 'HTTPS', local: 'Local path', none: 'No origin remote' })[method]);
-  text('remote-url', data.origin?.value || 'No origin configured');
-  text('auth-detail', method === 'https' ? `Credential helper: ${data.credentialHelper?.value || 'not configured'}` : data.coreSshCommand ? `SSH command override: ${data.coreSshCommand.value}` : sourceName(data.origin));
-  text('ssh-host', method === 'ssh' ? data.remote.host : 'Not in use');
-  text('ssh-target', data.ssh?.hostname ? `${data.ssh.user}@${data.ssh.hostname}` : 'This remote does not use SSH');
-  text('ssh-key', data.ssh?.identityFiles?.length ? `Identity: ${data.ssh.identityFiles.join(', ')}` : 'No SSH identity resolved');
+  $('identity-source').textContent = `Name from ${data.name?.scope || 'nowhere'} · email from ${data.email?.scope || 'nowhere'} config`;
+  renderSignIn(data);
   $('origins').replaceChildren();
   addOrigin('Commit name', sourceName(data.name));
   addOrigin('Commit email', sourceName(data.email));
   addOrigin('Origin remote', sourceName(data.origin));
   if (data.pushUrl) addOrigin('Push URL', `${data.pushUrl.value} · ${sourceName(data.pushUrl)}`);
   if (data.credentialHelper) addOrigin('Credential helper', sourceName(data.credentialHelper));
+  if (data.credentialUser) addOrigin('HTTPS account', sourceName(data.credentialUser));
   if (data.coreSshCommand) addOrigin('SSH command', sourceName(data.coreSshCommand));
   for (const include of data.conditionalIncludes) addOrigin('Folder rule', include.rule);
   $('new-name').value = data.name?.value || '';
   $('new-email').value = data.email?.value || '';
-  const found = await window.profileMap.profiles();
-  const select = $('new-host');
-  select.replaceChildren(new Option('Keep current remote', ''));
-  const remoteHost = method === 'ssh' ? data.ssh?.hostname : method === 'https' ? data.remote.host : null;
-  for (const host of found.sshHosts.filter(host => found.hostTargets[host] === remoteHost)) select.add(new Option(host, host));
-  select.disabled = !remoteHost || select.options.length === 1;
-  text('host-help', !remoteHost ? 'Add an SSH or HTTPS origin to use a host profile.' : select.options.length === 1 ? 'No SSH profile for this Git host yet. Create one from the sidebar.' : method === 'https' ? 'Selecting a profile will convert this repository’s HTTPS origin to SSH when you confirm.' : 'Select an SSH host profile for this repository’s origin.');
+  await refreshProfiles();
+  renderTargets(data);
   $('nav-repository').classList.remove('hidden');
   showView('repository');
-  if (data.embeddedSecret) showError(new Error('This remote URL contains a password or token. Anyone who can read .git/config can see it. Switch to an HTTPS or SSH profile to move it out of the URL.'));
+  if (data.embeddedSecret) showNotice('This remote URL contains a password or token, readable by anything that can open .git/config. Switch to an SSH or HTTPS profile to remove it from the URL.');
   const savedStatus = watchStatuses.get(data.root);
   if (savedStatus) showConnection(savedStatus);
-  else { document.querySelector('.connection-panel').dataset.state = 'unchecked'; text('connection-title', 'Not checked yet'); text('connection-detail', 'Check whether Git can reach this remote without asking for credentials.'); $('connection-time').textContent = ''; }
+  else showConnection({ state: 'unchecked', title: 'Not checked yet', detail: 'Check whether Git can reach this remote without asking you to sign in.' });
 }
 
-$('nav-watchlist').addEventListener('click', () => showView('watchlist'));
-$('nav-new-profile').addEventListener('click', () => showView('new-profile'));
-$('nav-overview').addEventListener('click', () => showView('overview'));
-$('nav-repository').addEventListener('click', () => { if (current) showView('repository'); });
-$('back-overview').addEventListener('click', () => showView('overview'));
-$('create-profile').addEventListener('click', async () => {
+/* Profiles */
+
+function setMethod(method) {
+  for (const [name, id] of [['ssh', 'method-ssh'], ['https', 'method-https']]) {
+    $(id).classList.toggle('selected', method === name);
+    $(id).setAttribute('aria-selected', String(method === name));
+  }
+  $('setup-form').classList.toggle('hidden', method !== 'ssh' || Boolean(createdProfile));
+  $('setup-complete').classList.toggle('hidden', method !== 'ssh' || !createdProfile);
+  const httpsDone = $('https-complete').dataset.done === 'true';
+  $('https-form').classList.toggle('hidden', method !== 'https' || httpsDone);
+  $('https-complete').classList.toggle('hidden', method !== 'https' || !httpsDone);
+}
+
+function renderProfileList() {
+  const list = $('profile-list');
+  list.replaceChildren();
+  const row = (iconName, title, detail, action) => {
+    const node = el('div', 'profile-row');
+    const badge = el('span', 'profile-icon'); badge.append(icon(iconName));
+    const copy = el('div'); copy.append(el('strong', '', title), el('span', '', detail));
+    node.append(badge, copy);
+    if (action) node.append(action);
+    list.append(node);
+  };
+  list.append(el('p', 'profile-group', 'SSH keys · from ~/.ssh/config'));
+  if (!knownProfiles.sshHosts.length) list.append(el('p', 'profile-empty', 'No SSH host aliases yet.'));
+  for (const host of knownProfiles.sshHosts) row('key', host, knownProfiles.hostTargets[host] ? `Connects to ${knownProfiles.hostTargets[host]}` : 'Host not resolved');
+  list.append(el('p', 'profile-group', 'HTTPS logins'));
+  if (!knownProfiles.httpsProfiles.length) list.append(el('p', 'profile-empty', 'No HTTPS profiles yet.'));
+  for (const profile of knownProfiles.httpsProfiles) {
+    row('lock', profile.username, profile.host, iconButton('close', `Remove ${profile.username}`, async () => {
+      try { await api.removeHttpsProfile(profile.id); await refreshProfiles(); renderProfileList(); }
+      catch (error) { showError(error); }
+    }));
+  }
+}
+
+function fillProviders() {
+  for (const id of ['setup-provider', 'https-provider']) {
+    $(id).replaceChildren(...Object.entries(providers).map(([key, provider]) => new Option(`${provider.label} · ${provider.hostname}`, key)));
+  }
+}
+
+$('method-ssh').addEventListener('click', () => setMethod('ssh'));
+$('method-https').addEventListener('click', () => setMethod('https'));
+
+$('create-profile').addEventListener('click', () => busy($('create-profile'), async () => {
   clearError();
-  $('create-profile').disabled = true;
   try {
-    createdProfile = await window.profileMap.createSshProfile({ provider: $('setup-provider').value, alias: $('setup-alias').value, email: $('setup-email').value, passphrase: $('setup-passphrase').value });
+    createdProfile = await api.createSshProfile({ provider: $('setup-provider').value, alias: $('setup-alias').value, email: $('setup-email').value, passphrase: $('setup-passphrase').value });
     $('setup-passphrase').value = '';
     text('created-profile-name', createdProfile.alias);
     $('created-public-key').value = createdProfile.publicKey;
-    $('setup-form').classList.add('hidden');
-    $('setup-complete').classList.remove('hidden');
+    setMethod('ssh');
+    await refreshProfiles(); renderProfileList();
   } catch (error) { showError(error); }
-  finally { $('create-profile').disabled = false; }
+}));
+$('copy-public-key').addEventListener('click', async () => {
+  if (!createdProfile) return;
+  await api.copyPublicKey(createdProfile.publicKey);
+  $('copy-public-key').lastChild.textContent = 'Copied';
 });
-$('copy-public-key').addEventListener('click', async () => { if (createdProfile) { await window.profileMap.copyPublicKey(createdProfile.publicKey); $('copy-public-key').textContent = 'Copied'; } });
-$('open-key-settings').addEventListener('click', async () => { if (createdProfile) { try { await window.profileMap.openAccountSettings(createdProfile.keyUrl); } catch (error) { showError(error); } } });
-$('another-profile').addEventListener('click', () => { createdProfile = null; $('setup-alias').value = ''; $('setup-email').value = ''; $('setup-form').classList.remove('hidden'); $('setup-complete').classList.add('hidden'); $('copy-public-key').textContent = 'Copy public key'; });
-$('favorite').addEventListener('click', async () => {
-  if (!current) return;
-  try {
-    watchPaths = watchPaths.includes(current.root) ? await window.profileMap.favoriteRemove(current.root) : await window.profileMap.favoriteAdd(current.root);
-    renderWatchlist();
-    if (watchPaths.includes(current.root)) { watchProfiles.set(current.root, current); renderWatchlist(); checkOne(current.root); }
-  } catch (error) { showError(error); }
+$('open-key-settings').addEventListener('click', async () => { if (createdProfile) { try { await api.openAccountSettings(createdProfile.keyUrl); } catch (error) { showError(error); } } });
+$('another-profile').addEventListener('click', () => {
+  createdProfile = null; $('setup-alias').value = ''; $('setup-email').value = '';
+  $('copy-public-key').lastChild.textContent = 'Copy public key';
+  setMethod('ssh');
 });
-$('refresh-all').addEventListener('click', checkAll);
-$('check-remote').addEventListener('click', () => { if (current) checkOne(current.root); });
-$('check-push').addEventListener('click', () => { if (current) checkOne(current.root, 'push'); });
-window.profileMap.favorites().then(paths => { watchPaths = paths; renderWatchlist(); for (const root of paths) refreshWatchProfile(root); checkAll(); }).catch(showError);
-setInterval(() => { if (!document.hidden && watchPaths.length) checkAll(); }, 5 * 60 * 1000);
 
-$('browse').addEventListener('click', async () => { const folder = await window.profileMap.pickFolder(); if (folder) { $('path').value = folder; try { await render(folder); } catch (error) { showError(error); } } });
-$('inspect').addEventListener('click', async () => { try { await render($('path').value); } catch (error) { showError(error); } });
-$('path').addEventListener('keydown', event => { if (event.key === 'Enter') $('inspect').click(); });
+$('open-token-page').addEventListener('click', async () => {
+  const provider = providers[$('https-provider').value];
+  if (provider) { try { await api.openAccountSettings(provider.tokenUrl); } catch (error) { showError(error); } }
+});
+$('create-https').addEventListener('click', () => busy($('create-https'), async () => {
+  clearError();
+  try {
+    const result = await api.createHttpsProfile({ provider: $('https-provider').value, username: $('https-username').value, token: $('https-token').value });
+    $('https-token').value = '';
+    text('https-complete-name', `${result.profile.username} on ${result.profile.host}`);
+    $('https-complete-detail').textContent = result.tokenSaved
+      ? `The token was saved by your credential helper (${result.helper}). Open a repository and pick this profile under “Switch this repository”.`
+      : 'No token saved. Git will ask you to sign in the first time this profile is used, and your credential helper will remember it.';
+    $('https-complete').dataset.done = 'true';
+    setMethod('https');
+    await refreshProfiles(); renderProfileList();
+  } catch (error) { showError(error); }
+}));
+$('another-https').addEventListener('click', () => {
+  $('https-complete').dataset.done = 'false'; $('https-username').value = '';
+  setMethod('https');
+});
+
+/* Switch */
+
 $('preview').addEventListener('click', async () => {
   try {
     clearError();
-    proposed = { name: $('new-name').value, email: $('new-email').value, sshHost: $('new-host').value, expectedRoot: current.root, expectedRemote: current.origin?.value || '' };
-    const preview = await window.profileMap.preview(current.root, proposed);
-    if (!preview.changes.length) { $('notice').textContent = 'These settings are already in effect.'; $('notice').classList.remove('hidden'); return; }
+    const [type, ...rest] = $('new-target').value.split(':');
+    proposed = { name: $('new-name').value, email: $('new-email').value, target: type ? { type, value: rest.join(':') } : null,
+      expectedRoot: current.root, expectedRemote: current.origin?.value || '' };
+    const preview = await api.preview(current.root, proposed);
+    if (!preview.changes.length) { showNotice('These settings are already in effect.', 'info'); return; }
     $('changes').replaceChildren();
     for (const item of preview.changes) {
-      const row = document.createElement('div'); row.className = 'change';
-      const label = document.createElement('strong'); label.textContent = item.label;
-      const from = document.createElement('span'); from.className = 'from'; from.textContent = `Current: ${item.from}`;
-      const to = document.createElement('span'); to.className = 'to'; to.textContent = `New: ${item.to}`;
-      row.append(label, from, to); $('changes').append(row);
+      const row = el('div', 'change');
+      row.append(el('strong', '', item.label), el('span', 'from', item.from), el('span', 'to', item.to));
+      $('changes').append(row);
     }
     $('modal').classList.remove('hidden');
+    $('apply').focus();
   } catch (error) { showError(error); }
 });
 const close = () => $('modal').classList.add('hidden');
 $('close').addEventListener('click', close);
 $('cancel').addEventListener('click', close);
 $('modal').addEventListener('click', event => { if (event.target === $('modal')) close(); });
-$('apply').addEventListener('click', async () => {
-  $('apply').disabled = true;
-  try { await window.profileMap.apply(current.root, proposed); close(); await render(current.root); }
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('modal').classList.contains('hidden')) close(); });
+$('apply').addEventListener('click', () => busy($('apply'), async () => {
+  try { await api.apply(current.root, proposed); close(); await render(current.root); showNotice('Switch applied.', 'info'); }
   catch (error) { close(); showError(error); }
-  finally { $('apply').disabled = false; }
+}));
+
+/* Navigation and start-up */
+
+$('nav-watchlist').addEventListener('click', () => showView('watchlist'));
+$('nav-new-profile').addEventListener('click', () => showView('new-profile'));
+$('nav-overview').addEventListener('click', () => showView('overview'));
+$('nav-repository').addEventListener('click', () => { if (current) showView('repository'); });
+$('back-overview').addEventListener('click', () => showView('overview'));
+$('favorite').addEventListener('click', async () => {
+  if (!current) return;
+  try {
+    watchPaths = watchPaths.includes(current.root) ? await api.favoriteRemove(current.root) : await api.favoriteAdd(current.root);
+    if (watchPaths.includes(current.root)) { watchProfiles.set(current.root, current); checkOne(current.root); }
+    renderWatchlist();
+  } catch (error) { showError(error); }
 });
+$('refresh-all').addEventListener('click', checkAll);
+$('check-remote').addEventListener('click', () => { if (current) checkOne(current.root); });
+$('check-push').addEventListener('click', () => { if (current) checkOne(current.root, 'push'); });
+$('browse').addEventListener('click', async () => {
+  const folder = await api.pickFolder();
+  if (folder) { $('path').value = folder; try { await render(folder); } catch (error) { showError(error); } }
+});
+$('inspect').addEventListener('click', () => busy($('inspect'), async () => { try { await render($('path').value); } catch (error) { showError(error); } }));
+$('path').addEventListener('keydown', event => { if (event.key === 'Enter') $('inspect').click(); });
+
+function showTheme(theme) {
+  for (const button of document.querySelectorAll('.theme-switch button')) button.setAttribute('aria-checked', String(button.dataset.theme === theme));
+}
+for (const button of document.querySelectorAll('.theme-switch button')) {
+  button.addEventListener('click', async () => { try { showTheme(await api.setTheme(button.dataset.theme)); } catch (error) { showError(error); } });
+}
+
+api.appearance().then(({ platform, accent, theme }) => {
+  document.documentElement.dataset.platform = platform;
+  showTheme(theme);
+  if (accent) document.documentElement.style.setProperty('--accent', `#${accent.slice(0, 6)}`);
+}).catch(() => {});
+api.providers().then(found => { providers = found; fillProviders(); }).catch(showError);
+api.favorites().then(paths => { watchPaths = paths; renderWatchlist(); for (const root of paths) refreshWatchProfile(root); checkAll(); }).catch(showError);
+setInterval(() => { if (!document.hidden && watchPaths.length) checkAll(); }, 5 * 60 * 1000);
