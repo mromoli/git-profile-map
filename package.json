@@ -1,0 +1,25 @@
+{
+  "name": "git-profile-map",
+  "version": "0.2.0",
+  "private": true,
+  "description": "See and switch the Git identity and SSH profile used by a repository",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "app.gitprofilemap.desktop",
+    "productName": "Git Profile Map",
+    "files": ["src/**/*", "package.json"],
+    "mac": { "target": ["dmg", "zip"], "identity": null },
+    "win": { "target": ["nsis", "portable"] },
+    "linux": { "target": ["AppImage", "deb"] }
+  }
+}
