@@ -31,13 +31,18 @@ Git Profile Map is a small desktop app for people with more than one Git account
 
 ## Install
 
-Download the installer for your system from the [latest release](https://github.com/mromoli/git-profile-map/releases/latest): `.dmg` for macOS, `.exe` for Windows, `.AppImage` or `.deb` for Linux. You need Git and OpenSSH installed.
+Download the installer for your system from the [latest release](https://github.com/mromoli/git-profile-map/releases/latest). You need Git and OpenSSH installed.
 
-The macOS build is not code-signed yet, so on first launch right-click the app and choose **Open**, or run:
+| Your computer | Download |
+| --- | --- |
+| Mac with Apple Silicon (M1 or later) | `Git-Profile-Map-<version>-mac-arm64.dmg` |
+| Mac with Intel | `Git-Profile-Map-<version>-mac-x64.dmg` |
+| Windows | `Git-Profile-Map-Setup-<version>.exe` |
+| Linux | `Git-Profile-Map-<version>.AppImage`, or the `.deb` on Debian/Ubuntu |
 
-```sh
-xattr -dr com.apple.quarantine "/Applications/Git Profile Map.app"
-```
+**macOS:** the app isn't notarized by Apple yet, so the first time you open it macOS says it can't verify the app. Click **Done**, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to Git Profile Map. You only need to do this once.
+
+**Windows:** SmartScreen may warn about an unrecognized app. Click **More info → Run anyway**.
 
 ## How profiles work
 
