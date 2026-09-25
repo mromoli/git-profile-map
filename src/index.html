@@ -3,77 +3,207 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
   <title>Git Profile Map</title>
   <link rel="stylesheet" href="./style.css">
-  <link rel="stylesheet" href="./watch.css">
 </head>
 <body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.8 2.5 5.1 5.6.8-4 4 .9 5.6-5-2.7-5 2.7.9-5.6-4-4 5.6-.8z"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16.5 7l2.5 2.5M14.5 9l2 2"/></symbol>
+    <symbol id="i-repo" viewBox="0 0 24 24"><path d="M6 4.5h11.5v13H7.5A1.5 1.5 0 0 0 6 19V4.5ZM6 19a1.5 1.5 0 0 0 1.5 1.5h10v-3"/><path d="M9.5 8.5h4.5"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1.2-3.2 3.8-4.8 7-4.8s5.8 1.6 7 4.8"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l2 2H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h13m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H6m5-5-5 5 5 5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 5h5v5m0-5-8 8"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10Z"/></symbol>
+    <symbol id="i-auto" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="11.5" rx="2"/><path d="M9 20h6m-3-3.5V20"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  </svg>
+
   <div class="app">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">⌘</div><div><strong>Git Profile Map</strong><span>Identity, made visible</span></div></div>
-      <div class="side-label">WORKSPACE</div>
-      <button class="nav selected" id="nav-overview"><span class="nav-icon">▦</span> Overview</button>
-      <button class="nav" id="nav-watchlist"><span class="nav-icon">☆</span> Watchlist <span class="nav-count" id="watch-count">0</span></button>
-      <button class="nav" id="nav-new-profile"><span class="nav-icon">＋</span> New SSH profile</button>
-      <button class="nav hidden" id="nav-repository"><span class="nav-icon">⌁</span> Repository</button>
+      <div class="titlebar-space"></div>
+      <nav class="nav-list" aria-label="Sections">
+        <button class="nav selected" id="nav-overview"><svg><use href="#i-search"/></svg>Inspect</button>
+        <button class="nav" id="nav-watchlist"><svg><use href="#i-star"/></svg>Watchlist<span class="nav-count" id="watch-count">0</span></button>
+        <button class="nav" id="nav-new-profile"><svg><use href="#i-key"/></svg>Profiles</button>
+        <button class="nav hidden" id="nav-repository"><svg><use href="#i-repo"/></svg><span class="nav-label" id="nav-repository-label">Repository</span></button>
+      </nav>
       <div class="sidebar-spacer"></div>
-      <div class="sidebar-note"><span class="note-icon">◈</span><strong>Local by design</strong><p>Your keys stay on this computer. Git settings change only when you confirm a switch.</p></div>
-      <div class="side-footer">Git Profile Map <span>v0.2</span></div>
-    </aside>
-    <main>
-      <div class="notice hidden" id="notice" role="alert"></div>
-      <div id="overview-view">
-      <header><div class="eyebrow">REPOSITORY INSPECTOR</div><h1>Know which identity<br>Git will use.</h1><p class="intro">Choose any folder inside a repository. See the effective commit identity, remote login method, and SSH profile in one place.</p></header>
-      <section class="path-bar">
-        <div class="path-icon">⌁</div>
-        <div class="path-copy"><label for="path">Repository folder</label><input id="path" placeholder="Paste a folder path, or browse…" spellcheck="false"><span id="path-hint">No folder selected</span></div>
-        <button class="secondary" id="browse">Browse</button><button class="primary" id="inspect">Inspect <span>→</span></button>
-      </section>
-      <section id="empty" class="empty"><div class="empty-graphic"><span>⌘</span><span>↗</span><span>◈</span></div><h2>Start with a repository</h2><p>Pick a folder to see its Git name, email and authentication settings.</p></section>
+      <div class="sidebar-note">
+        <svg><use href="#i-lock"/></svg>
+        <p><strong>Stays on this computer.</strong> Keys and tokens never leave your computer, and Git settings change only when you confirm.</p>
       </div>
-      <section id="watchlist" class="watchlist hidden"><div class="section-heading watch-heading"><div><div class="eyebrow">SAVED REPOSITORIES</div><h2>Watchlist</h2><p>Connection checks refresh when the app opens and every five minutes while it stays open.</p></div><button class="secondary" id="refresh-all">Check all</button></div><div id="watch-items" class="watch-items"></div><p class="watch-help">SSH keys usually remain valid. After a restart, your SSH agent may need to load a key again.</p></section>
-      <section id="new-profile-view" class="hidden setup-view">
-        <div class="eyebrow">ACCOUNT SETUP</div><h1>New SSH profile</h1>
-        <p class="setup-intro">Create a separate key for a Git account, then add its public key to that account. Your private key stays on this computer.</p>
-        <div class="panel setup-panel" id="setup-form">
-          <label class="full-field">Git hosting service<select id="setup-provider"><option value="github">GitHub</option><option value="gitlab">GitLab</option><option value="bitbucket">Bitbucket</option></select></label>
-          <div class="field-row"><label>Profile name<input id="setup-alias" placeholder="github-work" autocomplete="off"></label><label>Account email<input id="setup-email" type="email" placeholder="you@example.com" autocomplete="off"></label></div>
-          <label class="full-field">Key passphrase (optional)<input id="setup-passphrase" type="password" autocomplete="new-password" placeholder="Add a passphrase for extra protection"></label>
-          <p class="field-help">Use a passphrase to protect the key if someone gets access to the file. You may be asked for it when Git connects.</p>
-          <button class="primary" id="create-profile">Create key and profile <span>→</span></button>
+      <div class="side-footer">
+        <div class="theme-switch" role="radiogroup" aria-label="Appearance">
+          <button role="radio" data-theme="system" title="Match system" aria-label="Match system appearance"><svg><use href="#i-auto"/></svg></button>
+          <button role="radio" data-theme="light" title="Light" aria-label="Light appearance"><svg><use href="#i-sun"/></svg></button>
+          <button role="radio" data-theme="dark" title="Dark" aria-label="Dark appearance"><svg><use href="#i-moon"/></svg></button>
         </div>
-        <div class="panel setup-panel hidden" id="setup-complete">
-          <div class="eyebrow">KEY CREATED</div><h2 id="created-profile-name"></h2>
-          <p>Your SSH profile is ready on this computer. Add this public key to your Git account to finish connecting it.</p>
-          <textarea id="created-public-key" readonly aria-label="Public SSH key"></textarea>
-          <div class="setup-actions"><button class="secondary" id="copy-public-key">Copy public key</button><button class="primary" id="open-key-settings">Open account key settings ↗</button></div>
-          <p class="field-help">Paste the public key into the account’s SSH keys page. Then open a repository and select this profile under “Switch this repository.”</p>
-          <button class="back-link" id="another-profile">Create another profile</button>
+        <span id="app-version"></span>
+      </div>
+    </aside>
+
+    <main id="main">
+      <div class="drag-strip"></div>
+      <div class="notice hidden" id="notice" role="alert"></div>
+
+      <section id="overview-view" class="view">
+        <header class="hero">
+          <p class="kicker">Repository inspector</p>
+          <h1>Which account will Git use here?</h1>
+          <p class="lede">Choose a folder inside a repository to see its commit identity, how it signs in to the remote, and where each setting comes from.</p>
+        </header>
+        <div class="path-bar glass">
+          <span class="path-icon"><svg><use href="#i-folder"/></svg></span>
+          <div class="path-copy">
+            <label for="path">Repository folder</label>
+            <input id="path" placeholder="~/Projects/my-repo" spellcheck="false" autocomplete="off">
+            <span id="path-hint">Paste a path or browse for a folder</span>
+          </div>
+          <button class="secondary" id="browse">Browse…</button>
+          <button class="primary" id="inspect">Inspect<svg><use href="#i-arrow"/></svg></button>
+        </div>
+        <div id="empty" class="empty">
+          <div class="empty-steps">
+            <div><span>1</span><p><strong>Inspect a repository</strong> to see its name, email and sign-in method.</p></div>
+            <div><span>2</span><p><strong>Create a profile</strong> for each account: an SSH key or an HTTPS login.</p></div>
+            <div><span>3</span><p><strong>Switch</strong> the repository to that profile after reviewing every change.</p></div>
+          </div>
         </div>
       </section>
-      <section id="results" class="hidden">
-        <button class="back-link" id="back-overview">← Back to overview</button>
-        <div class="section-heading"><div><div class="eyebrow">CURRENT SETUP</div><h2 id="repo-name">Repository</h2><p id="repo-path"></p></div><div class="heading-actions"><button class="secondary" id="favorite">☆ Save to watchlist</button><span class="status"><i></i> Config resolved</span></div></div>
-        <div class="summary-grid">
-          <article class="summary"><div class="summary-top"><span class="tile-icon blue">◎</span><span>COMMIT IDENTITY</span></div><h3 id="identity-name">—</h3><p id="identity-email">—</p><div class="source" id="identity-source"></div></article>
-          <article class="summary"><div class="summary-top"><span class="tile-icon green">↗</span><span>REMOTE LOGIN</span></div><h3 id="auth-method">—</h3><p id="remote-url">—</p><div class="source" id="auth-detail"></div></article>
-          <article class="summary"><div class="summary-top"><span class="tile-icon peach">⌁</span><span>SSH PROFILE</span></div><h3 id="ssh-host">—</h3><p id="ssh-target">—</p><div class="source" id="ssh-key"></div></article>
+
+      <section id="watchlist" class="view hidden">
+        <header class="page-head">
+          <div><p class="kicker">Saved repositories</p><h1>Watchlist</h1><p class="lede">Connection checks run when the app opens and every five minutes while it is visible.</p></div>
+          <button class="secondary" id="refresh-all"><svg><use href="#i-refresh"/></svg>Check all</button>
+        </header>
+        <div id="watch-items" class="watch-items"></div>
+        <p class="footnote">SSH keys rarely expire, but after a restart your SSH agent may need to load a key again.</p>
+      </section>
+
+      <section id="new-profile-view" class="view hidden">
+        <header class="page-head">
+          <div><p class="kicker">Accounts</p><h1>Profiles</h1><p class="lede">One profile per Git account. SSH profiles use their own key; HTTPS profiles pick a saved login from your credential helper.</p></div>
+        </header>
+
+        <div class="profile-layout">
+          <div class="glass panel">
+            <div class="segmented" role="tablist" aria-label="Sign-in method">
+              <button role="tab" id="method-ssh" class="selected" aria-selected="true">SSH key</button>
+              <button role="tab" id="method-https" aria-selected="false">HTTPS login</button>
+            </div>
+
+            <div id="setup-form">
+              <label class="field">Git hosting service<select id="setup-provider"></select></label>
+              <div class="field-row">
+                <label class="field">Profile name<input id="setup-alias" placeholder="github-work" autocomplete="off" spellcheck="false"></label>
+                <label class="field">Account email<input id="setup-email" type="email" placeholder="you@company.com" autocomplete="off"></label>
+              </div>
+              <label class="field">Key passphrase <em>optional</em><input id="setup-passphrase" type="password" autocomplete="new-password" placeholder="Protects the key file if someone copies it"></label>
+              <button class="primary wide" id="create-profile">Create key and profile<svg><use href="#i-arrow"/></svg></button>
+            </div>
+            <div class="hidden" id="setup-complete">
+              <p class="kicker success">Key created</p><h2 id="created-profile-name"></h2>
+              <p class="body">Add this public key to the account to finish. The private key stays in <code>~/.ssh</code>.</p>
+              <textarea id="created-public-key" readonly aria-label="Public SSH key"></textarea>
+              <div class="actions"><button class="secondary" id="copy-public-key"><svg><use href="#i-copy"/></svg>Copy public key</button><button class="primary" id="open-key-settings">Open SSH key settings<svg><use href="#i-external"/></svg></button></div>
+              <button class="link" id="another-profile">Create another profile</button>
+            </div>
+
+            <div class="hidden" id="https-form">
+              <label class="field">Git hosting service<select id="https-provider"></select></label>
+              <label class="field">Account username<input id="https-username" placeholder="your-username" autocomplete="off" spellcheck="false"></label>
+              <label class="field">Personal access token <em>optional</em><input id="https-token" type="password" autocomplete="off" placeholder="Saved to your credential helper, never by this app"></label>
+              <p class="help">Leave the token empty if you’ll sign in the first time Git asks. <button class="link inline" id="open-token-page">Create a token<svg><use href="#i-external"/></svg></button></p>
+              <button class="primary wide" id="create-https">Save HTTPS profile<svg><use href="#i-arrow"/></svg></button>
+            </div>
+            <div class="hidden" id="https-complete">
+              <p class="kicker success">Profile saved</p><h2 id="https-complete-name"></h2>
+              <p class="body" id="https-complete-detail"></p>
+              <button class="link" id="another-https">Add another HTTPS profile</button>
+            </div>
+          </div>
+
+          <div class="glass panel">
+            <h3>Saved profiles</h3>
+            <div id="profile-list" class="profile-list"></div>
+          </div>
         </div>
-        <section class="connection-panel"><div><div class="eyebrow">CONNECTION STATUS</div><h3 id="connection-title">Not checked yet</h3><p id="connection-detail">Run a check to see whether Git can reach this remote without asking for credentials.</p><span id="connection-time"></span></div><div class="connection-actions"><button class="secondary" id="check-remote">Check connection</button><button class="secondary" id="check-push">Test push (dry run)</button></div></section>
+      </section>
+
+      <section id="results" class="view hidden">
+        <button class="link back" id="back-overview"><svg><use href="#i-back"/></svg>Inspect another folder</button>
+        <header class="page-head">
+          <div><p class="kicker">Current setup</p><h1 id="repo-name">Repository</h1><p class="lede mono" id="repo-path"></p></div>
+          <button class="secondary" id="favorite"><svg><use href="#i-star"/></svg><span>Save to watchlist</span></button>
+        </header>
+
+        <div class="summary-grid">
+          <article class="glass summary">
+            <span class="tile-icon"><svg><use href="#i-person"/></svg></span>
+            <p class="label">Commits as</p>
+            <h2 id="identity-name">—</h2>
+            <p class="value" id="identity-email">—</p>
+            <p class="source" id="identity-source"></p>
+          </article>
+          <article class="glass summary">
+            <span class="tile-icon"><svg><use href="#i-link"/></svg></span>
+            <p class="label">Signs in with <span class="method-badge" id="auth-method">—</span></p>
+            <h2 id="ssh-host">—</h2>
+            <p class="value mono" id="remote-url">—</p>
+            <p class="source" id="ssh-target"></p>
+            <p class="source" id="ssh-key"></p>
+            <p class="source" id="auth-detail"></p>
+          </article>
+        </div>
+
+        <section class="glass connection-panel" data-state="unchecked">
+          <span class="status-dot"></span>
+          <div class="connection-copy"><h3 id="connection-title">Not checked yet</h3><p id="connection-detail"></p><span id="connection-time"></span></div>
+          <div class="actions"><button class="secondary" id="check-remote">Check connection</button><button class="secondary" id="check-push">Test push (dry run)</button></div>
+        </section>
+
         <div class="two-col">
-          <section class="panel"><div class="panel-head"><div><h3>Where settings come from</h3><p>Git resolves local, global and folder rules in order.</p></div></div><div id="origins"></div></section>
-          <section class="panel switch-panel"><div class="panel-head"><div><h3>Switch this repository</h3><p>Set a local commit identity and choose an SSH profile for the origin.</p></div></div>
-            <div class="field-row"><label>Commit name<input id="new-name" autocomplete="off"></label><label>Commit email<input id="new-email" type="email" autocomplete="off"></label></div>
-            <label class="full-field">SSH host profile<select id="new-host"><option value="">Keep current remote</option></select></label>
-            <p class="field-help" id="host-help">Choose an alias from your SSH config to route this repository through that profile.</p>
-            <button class="primary preview-button" id="preview">Review changes <span>→</span></button>
+          <section class="glass panel switch-panel">
+            <h3>Switch this repository</h3>
+            <p class="help">Sets a local commit identity and, optionally, moves the origin to another profile.</p>
+            <div class="field-row">
+              <label class="field">Commit name<input id="new-name" autocomplete="off"></label>
+              <label class="field">Commit email<input id="new-email" type="email" autocomplete="off"></label>
+            </div>
+            <label class="field">Sign-in profile<select id="new-target"><option value="">Keep current sign-in</option></select></label>
+            <p class="help" id="host-help"></p>
+            <button class="primary wide" id="preview">Review changes<svg><use href="#i-arrow"/></svg></button>
+          </section>
+          <section class="glass panel">
+            <h3>Where settings come from</h3>
+            <p class="help">Git reads system, global, folder rules and local config in order; the last one wins.</p>
+            <div id="origins"></div>
           </section>
         </div>
       </section>
     </main>
   </div>
-  <div class="modal-backdrop hidden" id="modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="close" id="close" aria-label="Close">×</button><div class="eyebrow">REVIEW SWITCH</div><h2 id="modal-title">Apply these changes?</h2><p class="modal-intro">Only this repository's local Git configuration and origin remote will be updated.</p><div id="changes"></div><div class="modal-actions"><button class="secondary" id="cancel">Cancel</button><button class="primary" id="apply">Apply switch</button></div></div></div>
+
+  <div class="sheet-backdrop hidden" id="modal">
+    <div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <button class="icon-button close" id="close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+      <p class="kicker">Review</p>
+      <h2 id="modal-title">Apply these changes?</h2>
+      <p class="help">Only this repository’s local Git config is written. You can switch back at any time.</p>
+      <div id="changes"></div>
+      <div class="actions end"><button class="secondary" id="cancel">Cancel</button><button class="primary" id="apply">Apply switch</button></div>
+    </div>
+  </div>
   <script src="./renderer.js"></script>
 </body>
 </html>

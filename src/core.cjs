@@ -3,6 +3,7 @@ const { promisify } = require('node:util');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { readSshHosts } = require('./ssh-config.cjs');
 const runFile = promisify(execFile);
 
 async function run(command, args, cwd) {
@@ -53,7 +54,8 @@ function parseRemote(remote) {
   try {
     const url = new URL(remote);
     if (url.protocol === 'ssh:') return { method: 'ssh', user: url.username || 'git', host: url.hostname, repoPath: url.pathname.replace(/^\//, ''), style: 'url' };
-    if (url.protocol === 'https:' || url.protocol === 'http:') return { method: 'https', host: url.hostname, style: 'url' };
+    if (url.protocol === 'https:' || url.protocol === 'http:')
+      return { method: 'https', host: url.hostname, port: url.port, user: decodeURIComponent(url.username) || null, repoPath: url.pathname.replace(/^\//, ''), style: 'url' };
     if (url.protocol === 'file:') return { method: 'local', style: 'url' };
   } catch {}
   const scp = remote.match(/^(?:([^@/\s]+)@)?([^:/\s]+):(.+)$/);
@@ -79,7 +81,24 @@ async function sshResolution(host) {
   catch (error) { return { error: error.message }; }
 }
 
-async function inspect(folder) {
+// The Git host a remote really talks to (SSH aliases resolved through ssh -G).
+const remoteHostname = (remote, ssh) => remote?.method === 'ssh' ? ssh?.hostname || null : remote?.method === 'https' ? remote.host : null;
+// Credential helpers store logins per host and username, so this key picks the HTTPS account.
+const credentialUserKey = hostname => `credential.https://${hostname}.username`;
+
+// Hides a password or token embedded in an HTTPS remote so it never reaches the window.
+function redactUrl(value) {
+  if (!value) return value;
+  try {
+    const url = new URL(value);
+    if (url.password) { url.password = '***'; return url.toString(); }
+  } catch {}
+  return value;
+}
+
+const hasEmbeddedSecret = value => { try { return Boolean(new URL(value).password); } catch { return false; } };
+
+async function inspectRaw(folder) {
   if (typeof folder !== 'string' || !folder.trim()) throw new Error('Choose a repository folder.');
   const input = path.resolve(folder.replace(/^~(?=$|[\\/])/, os.homedir()));
   const stat = await fs.stat(input).catch(() => null);
@@ -93,18 +112,30 @@ async function inspect(folder) {
     configValue(input, 'core.sshCommand'), configList(input)
   ]);
   const remote = parseRemote(origin?.value);
-  const ssh = remote.method === 'ssh' ? await sshResolution(remote.host) : null;
-  return { root, name, email, origin, pushUrl, credentialHelper, coreSshCommand, remote, ssh,
+  const pushRemote = pushUrl ? parseRemote(pushUrl.value) : null;
+  const [ssh, pushSsh] = await Promise.all([
+    remote.method === 'ssh' ? sshResolution(remote.host) : null,
+    pushRemote?.method === 'ssh' ? sshResolution(pushRemote.host) : null
+  ]);
+  const hostname = remoteHostname(remote, ssh);
+  const credentialUser = hostname ? await configValue(input, credentialUserKey(hostname)) : null;
+  const httpsUser = remote.method === 'https' ? remote.user || credentialUser?.value || null : null;
+  return { root, name, email, origin, pushUrl, pushRemote, pushSsh, credentialHelper, coreSshCommand, remote, ssh, hostname, credentialUser, httpsUser,
+    pushUrlCount: entries.filter(x => x.entry.startsWith('remote.origin.pushurl\n')).length,
     conditionalIncludes: entries.filter(x => x.entry.startsWith('includeif.')).map(x => ({ source: x.source, rule: x.entry })) };
+}
+
+async function inspect(folder) {
+  const raw = await inspectRaw(folder);
+  const redact = record => record && { ...record, value: redactUrl(record.value) };
+  return { ...raw, origin: redact(raw.origin), pushUrl: redact(raw.pushUrl),
+    embeddedSecret: hasEmbeddedSecret(raw.origin?.value) || hasEmbeddedSecret(raw.pushUrl?.value) };
 }
 
 async function profiles() {
   const entries = await configList(os.homedir(), 'global');
   const includes = entries.filter(x => /^include(?:if)?\./.test(x.entry));
-  const sshConfig = await fs.readFile(path.join(os.homedir(), '.ssh', 'config'), 'utf8').catch(() => '');
-  const hosts = [...sshConfig.matchAll(/^\s*Host\s+(.+)$/gmi)]
-    .flatMap(match => match[1].split(/\s+/)).filter(x => x && !/[?*]/.test(x));
-  const sshHosts = [...new Set(hosts)];
+  const sshHosts = await readSshHosts();
   const hostTargets = Object.fromEntries(await Promise.all(sshHosts.map(async host => [host, (await sshResolution(host))?.hostname || null])));
   return { sshHosts, hostTargets, includes: includes.map(x => ({ source: x.source, rule: x.entry })) };
 }
@@ -128,70 +159,121 @@ function classifyProbe(result, kind) {
 
 async function checkConnection(folder, kind = 'read') {
   if (!['read', 'push'].includes(kind)) throw new Error('Unknown connection check.');
-  const data = await inspect(folder);
+  const data = await inspectRaw(folder);
   if (!data.origin?.value) return { state: 'attention', title: 'No origin remote', detail: 'Add an origin remote to test a connection.', checkedAt: new Date().toISOString() };
-  const env = { GIT_TERMINAL_PROMPT: '0', SSH_ASKPASS_REQUIRE: 'never' };
+  const env = { GIT_TERMINAL_PROMPT: '0', SSH_ASKPASS_REQUIRE: 'never', GCM_INTERACTIVE: 'never' };
   if (data.remote.method === 'ssh' && !data.coreSshCommand && !process.env.GIT_SSH_COMMAND)
     env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=8';
   const args = kind === 'push' ? ['push', '--dry-run', 'origin', 'HEAD'] : ['ls-remote', 'origin', 'HEAD'];
   return { ...classifyProbe(await probe('git', args, data.root, env), kind), root: data.root, kind };
 }
 
-function switchPreview(current, request) {
+
+const repoPathOf = (remote, value) => {
+  const repoPath = (remote.method === 'https' ? new URL(value).pathname : remote.repoPath).replace(/^[/~]+/, '');
+  if (!repoPath) throw new Error('The remote has no repository path.');
+  return repoPath;
+};
+
+// How each sign-in method rewrites a remote. `value` is an SSH host alias or an HTTPS username.
+const transports = {
+  ssh: {
+    label: 'SSH host aliases can contain only letters, numbers, dots, underscores and hyphens.',
+    pattern: /^[a-zA-Z0-9._-]+$/,
+    url(remote, alias, value) {
+      if (remote.method === 'ssh') return remote.style === 'url' ? `ssh://${remote.user}@${alias}/${remote.repoPath}` : `${remote.user}@${alias}:${remote.repoPath}`;
+      return `git@${alias}:${repoPathOf(remote, value)}`;
+    },
+    writes: () => []
+  },
+  https: {
+    label: 'HTTPS usernames can contain only letters, numbers, dots, underscores, hyphens, plus signs and @.',
+    pattern: /^[a-zA-Z0-9._@+-]{1,100}$/,
+    // The URL carries no username or token; the account comes from credential.<host>.username.
+    url(remote, _user, value, hostname) {
+      const port = remote.method === 'https' && remote.port ? `:${remote.port}` : '';
+      return `https://${hostname}${port}/${repoPathOf(remote, value)}`;
+    },
+    writes: (current, user) => [{ label: 'HTTPS account', key: credentialUserKey(current.hostname), from: current.credentialUser?.scope === 'local' ? current.credentialUser.value : undefined, to: user }]
+  }
+};
+
+function parseTarget(request) {
+  const target = request.target || (request.sshHost ? { type: 'ssh', value: request.sshHost } : null);
+  if (!target?.value) return null;
+  const transport = transports[target.type];
+  const value = String(target.value).trim();
+  if (!transport) throw new Error('Unknown sign-in method.');
+  if (!transport.pattern.test(value)) throw new Error(transport.label);
+  return { type: target.type, value, transport };
+}
+
+// Each change is one local config write; `to: null` unsets the key.
+function switchPreview(state, request) {
+  const current = { ...state, hostname: state.hostname ?? remoteHostname(state.remote, state.ssh) };
   const name = String(request.name || '').trim();
   const email = String(request.email || '').trim();
-  const host = String(request.sshHost || '').trim();
   if (!name || !email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter a name and a valid email address.');
-  if (host && !/^[a-zA-Z0-9._-]+$/.test(host)) throw new Error('SSH host aliases can contain only letters, numbers, dots, underscores and hyphens.');
-  if (host && !['ssh', 'https'].includes(current.remote.method)) throw new Error('This repository needs an SSH or HTTPS origin to use an SSH profile.');
-  const httpsPath = current.remote.method === 'https' ? new URL(current.origin.value).pathname.replace(/^\//, '') : '';
-  if (host && current.remote.method === 'https' && !httpsPath) throw new Error('The HTTPS origin has no repository path.');
-  const newRemote = host ? (current.remote.method === 'https'
-    ? `git@${host}:${httpsPath}`
-    : current.remote.style === 'url' ? `ssh://${current.remote.user}@${host}/${current.remote.repoPath}`
-      : `${current.remote.user}@${host}:${current.remote.repoPath}`) : current.origin?.value;
-  return { root: current.root, changes: [
-    { label: 'Commit name', from: current.name?.value || '(unset)', to: name, command: `git config --local user.name ${JSON.stringify(name)}` },
-    { label: 'Commit email', from: current.email?.value || '(unset)', to: email, command: `git config --local user.email ${JSON.stringify(email)}` },
-    ...(host ? [{ label: 'Origin remote', from: current.origin?.value || '(unset)', to: newRemote, command: `git remote set-url origin ${JSON.stringify(newRemote)}` }] : [])
-  ].filter(x => x.from !== x.to), newRemote, name, email };
+  const target = parseTarget(request);
+  if (target && !['ssh', 'https'].includes(current.remote.method)) throw new Error('This repository needs an SSH or HTTPS origin to use a sign-in profile.');
+  if (target && !current.hostname) throw new Error('Could not work out which Git host this origin uses.');
+  const changes = [
+    { label: 'Commit name', key: 'user.name', from: current.name?.value, to: name },
+    { label: 'Commit email', key: 'user.email', from: current.email?.value, to: email }
+  ];
+  const retarget = (remote, value) => target.transport.url(remote, target.value, value, current.hostname);
+  const newRemote = target ? retarget(current.remote, current.origin.value) : current.origin?.value;
+  if (target) {
+    changes.push({ label: 'Origin remote', key: 'remote.origin.url', from: current.origin.value, to: newRemote });
+    if (current.pushUrl) {
+      if (current.pushUrlCount > 1) throw new Error('Origin has more than one push URL. Remove the extras before switching.');
+      if (current.pushUrl.scope !== 'local') throw new Error(`Origin's push URL is set in ${current.pushUrl.source.replace(/^file:/, '')}. Change it there first.`);
+      if (!['ssh', 'https'].includes(current.pushRemote?.method) || remoteHostname(current.pushRemote, current.pushSsh) !== current.hostname)
+        throw new Error('Origin pushes to a different Git host than it fetches from. Update the push URL manually.');
+      changes.push({ label: 'Push URL', key: 'remote.origin.pushurl', from: current.pushUrl.value, to: retarget(current.pushRemote, current.pushUrl.value) });
+    }
+    changes.push(...target.transport.writes(current, target.value));
+  }
+  const pending = changes.filter(x => (x.from ?? null) !== x.to);
+  return { root: current.root, newRemote, name, email,
+    changes: pending.map(x => ({ label: x.label, from: x.from == null ? '(unset)' : redactUrl(x.from), to: x.to ?? '(unset)' })),
+    writes: pending.map(({ key, to }) => ({ key, to })) };
+}
+
+async function localGet(root, key) {
+  try { return await run('git', ['config', '--local', '--get', key], root); }
+  catch { return undefined; }
+}
+
+async function localSet(root, key, value) {
+  if (value == null) await run('git', ['config', '--local', '--unset-all', key], root).catch(() => {});
+  else await run('git', ['config', '--local', key, value], root);
 }
 
 async function applySwitch(folder, request) {
-  const current = await inspect(folder);
-  if (request.expectedRoot !== current.root || request.expectedRemote !== (current.origin?.value || ''))
+  const current = await inspectRaw(folder);
+  if (request.expectedRoot !== current.root || request.expectedRemote !== (redactUrl(current.origin?.value) || ''))
     throw new Error('Repository settings changed since the preview. Refresh and try again.');
   const preview = switchPreview(current, request);
-  if (request.sshHost) {
+  const target = parseTarget(request);
+  if (target?.type === 'ssh') {
     const known = (await profiles()).sshHosts;
-    if (!known.includes(request.sshHost)) throw new Error('Choose an SSH host defined in ~/.ssh/config.');
-    const target = await sshResolution(request.sshHost);
-    const currentHost = current.remote.method === 'ssh' ? current.ssh?.hostname : current.remote.host;
-    if (!target?.hostname || target.hostname !== currentHost)
+    if (!known.includes(target.value)) throw new Error('Choose an SSH host defined in ~/.ssh/config.');
+    const resolved = await sshResolution(target.value);
+    if (!resolved?.hostname || resolved.hostname !== current.hostname)
       throw new Error('This SSH profile points to a different Git host than the repository origin.');
   }
-  const local = await configList(current.root, 'local');
-  const localValue = key => local.filter(row => row.entry.startsWith(`${key}\n`)).at(-1)?.entry.slice(key.length + 1);
-  const previous = { name: localValue('user.name'), email: localValue('user.email'), remote: current.origin?.value };
-  const changed = [];
+  const applied = [];
   try {
-    if (preview.name !== current.name?.value) { await run('git', ['config', '--local', 'user.name', preview.name], current.root); changed.push('name'); }
-    if (preview.email !== current.email?.value) { await run('git', ['config', '--local', 'user.email', preview.email], current.root); changed.push('email'); }
-    if (request.sshHost && preview.newRemote !== current.origin?.value) { await run('git', ['remote', 'set-url', 'origin', preview.newRemote], current.root); changed.push('remote'); }
-  } catch (error) {
-    for (const item of changed.reverse()) {
-      try {
-        if (item === 'remote' && previous.remote) await run('git', ['remote', 'set-url', 'origin', previous.remote], current.root);
-        else if (item !== 'remote') {
-          const old = previous[item];
-          if (old !== undefined) await run('git', ['config', '--local', `user.${item}`, old], current.root);
-          else await run('git', ['config', '--local', '--unset-all', `user.${item}`], current.root).catch(() => {});
-        }
-      } catch {}
+    for (const write of preview.writes) {
+      applied.push({ key: write.key, previous: await localGet(current.root, write.key) });
+      await localSet(current.root, write.key, write.to);
     }
+  } catch (error) {
+    for (const { key, previous } of applied.reverse()) await localSet(current.root, key, previous).catch(() => {});
     throw error;
   }
   return inspect(current.root);
 }
 
-module.exports = { inspect, profiles, switchPreview, applySwitch, checkConnection, classifyProbe, parseRemote, parseSshG };
+module.exports = { inspect, profiles, switchPreview, applySwitch, checkConnection, classifyProbe, parseRemote, parseSshG, redactUrl };

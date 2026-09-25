@@ -81,3 +81,30 @@ test('inspects and changes only repository local identity and SSH remote', async
     assert.equal(git('remote', 'get-url', 'origin'), 'git@github.com:owner/repo.git');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('never returns a token embedded in the remote URL', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'git-profile-secret-'));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-q');
+    git('remote', 'add', 'origin', 'https://me:ghp_supersecret@github.com/owner/repo.git');
+    const data = await core.inspect(dir);
+    assert.equal(data.embeddedSecret, true);
+    assert.doesNotMatch(JSON.stringify(data), /supersecret/);
+    const preview = core.switchPreview(data, { name: 'A', email: 'a@example.com', sshHost: 'github-work' });
+    assert.doesNotMatch(JSON.stringify(preview), /supersecret/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('moves a push URL to the same SSH profile as origin', () => {
+  const current = { root: '/repo', name: { value: 'A' }, email: { value: 'a@example.com' },
+    origin: { value: 'git@github.com:owner/repo.git' }, remote: core.parseRemote('git@github.com:owner/repo.git'), ssh: { hostname: 'github.com' },
+    pushUrl: { value: 'git@github.com:owner/repo.git', scope: 'local', source: 'file:.git/config' }, pushUrlCount: 1,
+    pushRemote: core.parseRemote('git@github.com:owner/repo.git'), pushSsh: { hostname: 'github.com' } };
+  const preview = core.switchPreview(current, { name: 'A', email: 'a@example.com', sshHost: 'github-work' });
+  assert.deepEqual(preview.writes, [
+    { key: 'remote.origin.url', to: 'git@github-work:owner/repo.git' },
+    { key: 'remote.origin.pushurl', to: 'git@github-work:owner/repo.git' }
+  ]);
+  assert.throws(() => core.switchPreview({ ...current, pushSsh: { hostname: 'gitlab.com' } }, { name: 'A', email: 'a@example.com', sshHost: 'github-work' }), /different Git host/);
+});
