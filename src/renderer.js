@@ -154,6 +154,7 @@ async function render(folder) {
   text('host-help', !remoteHost ? 'Add an SSH or HTTPS origin to use a host profile.' : select.options.length === 1 ? 'No SSH profile for this Git host yet. Create one from the sidebar.' : method === 'https' ? 'Selecting a profile will convert this repository’s HTTPS origin to SSH when you confirm.' : 'Select an SSH host profile for this repository’s origin.');
   $('nav-repository').classList.remove('hidden');
   showView('repository');
+  if (data.embeddedSecret) showError(new Error('This remote URL contains a password or token. Anyone who can read .git/config can see it. Switch to an HTTPS or SSH profile to move it out of the URL.'));
   const savedStatus = watchStatuses.get(data.root);
   if (savedStatus) showConnection(savedStatus);
   else { document.querySelector('.connection-panel').dataset.state = 'unchecked'; text('connection-title', 'Not checked yet'); text('connection-detail', 'Check whether Git can reach this remote without asking for credentials.'); $('connection-time').textContent = ''; }

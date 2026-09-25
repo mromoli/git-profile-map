@@ -3,13 +3,25 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { providers } = require('./providers.cjs');
+const { readSshHosts, withHostBlock } = require('./ssh-config.cjs');
 const runFile = promisify(execFile);
 
-const providers = {
-  github: { hostname: 'github.com', keyUrl: 'https://github.com/settings/ssh/new' },
-  gitlab: { hostname: 'gitlab.com', keyUrl: 'https://gitlab.com/-/user_settings/ssh_keys' },
-  bitbucket: { hostname: 'bitbucket.org', keyUrl: 'https://bitbucket.org/account/settings/ssh-keys/' }
-};
+// Keeps the passphrase out of the process list: ssh-keygen asks a throwaway askpass script,
+// which reads it from this process's environment. Windows falls back to -N.
+async function generateKey(keyFile, email, passphrase) {
+  const args = ['-q', '-t', 'ed25519', '-C', email, '-f', keyFile];
+  if (!passphrase || process.platform === 'win32') {
+    return runFile('ssh-keygen', [...args, '-N', passphrase], { timeout: 20000, windowsHide: true });
+  }
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'git-profile-askpass-'));
+  const askpass = path.join(dir, 'askpass');
+  try {
+    await fs.writeFile(askpass, '#!/bin/sh\nprintf \'%s\\n\' "$GIT_PROFILE_MAP_PASSPHRASE"\n', { mode: 0o700 });
+    return await runFile('ssh-keygen', args, { timeout: 20000, windowsHide: true,
+      env: { ...process.env, SSH_ASKPASS: askpass, SSH_ASKPASS_REQUIRE: 'force', GIT_PROFILE_MAP_PASSPHRASE: passphrase } });
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+}
 
 async function createSshProfile(request, home = os.homedir()) {
   const provider = providers[request.provider];
@@ -28,16 +40,25 @@ async function createSshProfile(request, home = os.homedir()) {
     if (error.code === 'ENOENT') return '';
     throw error;
   });
-  const aliases = [...config.matchAll(/^\s*Host\s+(.+)$/gmi)].flatMap(match => match[1].split(/\s+/));
-  if (aliases.includes(alias)) throw new Error('This SSH profile name already exists. Choose another name.');
+  if ((await readSshHosts(home)).includes(alias)) throw new Error('This SSH profile name already exists. Choose another name.');
   if (await fs.stat(keyFile).catch(() => null) || await fs.stat(`${keyFile}.pub`).catch(() => null))
     throw new Error('A key with this profile name already exists. Choose another name.');
   let generated = false;
   try {
-    await runFile('ssh-keygen', ['-q', '-t', 'ed25519', '-C', email, '-f', keyFile, '-N', passphrase], { timeout: 20000, windowsHide: true });
+    await generateKey(keyFile, email, passphrase);
     generated = true;
     const block = `Host ${alias}\n  HostName ${provider.hostname}\n  User git\n  IdentityFile ${keyFile}\n  IdentitiesOnly yes\n`;
-    await fs.appendFile(configFile, `${config && !config.endsWith('\n') ? '\n' : ''}${config ? '\n' : ''}${block}`, { mode: 0o600 });
+    // Write through symlinks (dotfile managers) instead of replacing them.
+    const target = await fs.realpath(configFile).catch(() => configFile);
+    const mode = (await fs.stat(target).catch(() => null))?.mode & 0o777 || 0o600;
+    const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await fs.writeFile(temp, withHostBlock(config, block), { mode });
+      await fs.rename(temp, target);
+    } catch (error) {
+      await fs.unlink(temp).catch(() => {});
+      throw error;
+    }
   } catch (error) {
     if (generated) {
       await fs.unlink(keyFile).catch(() => {});

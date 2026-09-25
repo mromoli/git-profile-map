@@ -3,6 +3,7 @@ const path = require('node:path');
 const core = require('./core.cjs');
 const { createFavorites } = require('./favorites.cjs');
 const { createSshProfile } = require('./ssh-setup.cjs');
+const { settingsPages } = require('./providers.cjs');
 
 function createWindow() {
   const win = new BrowserWindow({ width: 1180, height: 790, minWidth: 850, minHeight: 620,
@@ -22,7 +23,7 @@ app.whenReady().then(() => {
   ipcMain.handle('ssh-profile-create', (_event, request) => createSshProfile(request));
   ipcMain.handle('public-key-copy', (_event, value) => { clipboard.writeText(String(value)); });
   ipcMain.handle('ssh-key-settings-open', (_event, url) => {
-    if (!['https://github.com/settings/ssh/new', 'https://gitlab.com/-/user_settings/ssh_keys', 'https://bitbucket.org/account/settings/ssh-keys/'].includes(url)) throw new Error('Unknown key settings page.');
+    if (!settingsPages.includes(url)) throw new Error('Unknown account settings page.');
     return shell.openExternal(url);
   });
   ipcMain.handle('preview', async (_event, folder, request) => core.switchPreview(await core.inspect(folder), request));
