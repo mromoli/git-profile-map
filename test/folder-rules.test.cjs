@@ -87,7 +87,8 @@ test('removing a rule deletes its include line and file and leaves the rest of t
 test('leaves hand-written folder rules alone', async t => {
   const { work, rules, globalConfig, dir } = await sandbox(t);
   await fs.writeFile(path.join(dir, 'mine.gitconfig'), '[user]\n\temail = mine@example.com\n');
-  await fs.appendFile(globalConfig, `[includeIf "gitdir:${work}/"]\n\tpath = mine.gitconfig\n`);
+  // Forward slashes, as on Windows: inside a quoted section name Git drops a backslash as an escape.
+  await fs.appendFile(globalConfig, `[includeIf "gitdir:${work.replaceAll('\\', '/')}/"]\n\tpath = mine.gitconfig\n`);
   const [rule] = await rules.list();
   assert.equal(rule.managed, false);
   assert.equal(rule.email, 'mine@example.com');
